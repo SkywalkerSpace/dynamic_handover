@@ -1,22 +1,10 @@
-from curses import KEY_SUSPEND
-from datetime import datetime
 import os
 import time
 
-from gym.spaces import Space
-
-import numpy as np
-import statistics
-from collections import deque
-
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-from itertools import chain
 from algorithms.marl.utils.separated_buffer import SeparatedReplayBuffer
-from utils.util import update_linear_schedule
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -72,12 +60,6 @@ class Runner:
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
-        if self.algorithm_name == "happo":
-            from algorithms.marl.happo_trainer import HAPPO as TrainAlgo
-            from algorithms.marl.happo_policy import HAPPO_Policy as Policy
-        if self.algorithm_name == "hatrpo":
-            from algorithms.marl.hatrpo_trainer import HATRPO as TrainAlgo
-            from algorithms.marl.hatrpo_policy import HATRPO_Policy as Policy
         if self.algorithm_name == "mappo":
             from algorithms.marl.mappo_trainer import MAPPO as TrainAlgo
             from algorithms.marl.mappo_policy import MAPPO_Policy as Policy

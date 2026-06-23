@@ -19,9 +19,6 @@ from tasks.hand_base.base_task import BaseTask
 from isaacgym import gymtorch
 from isaacgym import gymapi
 
-import matplotlib.pyplot as plt
-from PIL import Image as Im
-import cv2
 from torch import nn
 import torch.nn.functional as F
 
