@@ -2,6 +2,7 @@ from .distributions import Bernoulli, Categorical, DiagGaussian
 import torch
 import torch.nn as nn
 
+
 class ACTLayer(nn.Module):
     """
     MLP Module to compute actions.
@@ -10,6 +11,7 @@ class ACTLayer(nn.Module):
     :param use_orthogonal: (bool) whether to use orthogonal initialization.
     :param gain: (float) gain of the output layer of the network.
     """
+
     def __init__(self, action_space, inputs_dim, use_orthogonal, gain, args=None):
         super(ACTLayer, self).__init__()
         self.mixed_action = False
@@ -17,19 +19,23 @@ class ACTLayer(nn.Module):
         self.action_type = action_space.__class__.__name__
         if action_space.__class__.__name__ == "Discrete":
             action_dim = action_space.n
-            self.action_out = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
+            self.action_out = Categorical(
+                inputs_dim, action_dim, use_orthogonal, gain)
         elif action_space.__class__.__name__ == "Box":
             action_dim = action_space.shape[0]
-            self.action_out = DiagGaussian(inputs_dim, action_dim, use_orthogonal, gain, args)
+            self.action_out = DiagGaussian(
+                inputs_dim, action_dim, use_orthogonal, gain, args)
         elif action_space.__class__.__name__ == "MultiBinary":
             action_dim = action_space.shape[0]
-            self.action_out = Bernoulli(inputs_dim, action_dim, use_orthogonal, gain)
+            self.action_out = Bernoulli(
+                inputs_dim, action_dim, use_orthogonal, gain)
         elif action_space.__class__.__name__ == "MultiDiscrete":
             self.multi_discrete = True
             action_dims = action_space.high - action_space.low + 1
             self.action_outs = []
             for action_dim in action_dims:
-                self.action_outs.append(Categorical(inputs_dim, action_dim, use_orthogonal, gain))
+                self.action_outs.append(Categorical(
+                    inputs_dim, action_dim, use_orthogonal, gain))
             self.action_outs = nn.ModuleList(self.action_outs)
         else:  # discrete + continous
             self.mixed_action = True
@@ -37,30 +43,26 @@ class ACTLayer(nn.Module):
             discrete_dim = action_space[1].n
             self.action_outs = nn.ModuleList([DiagGaussian(inputs_dim, continous_dim, use_orthogonal, gain, args),
                                               Categorical(inputs_dim, discrete_dim, use_orthogonal, gain)])
-    
+
     def forward(self, x, available_actions=None, deterministic=False):
         """
         Compute actions and action logprobs from given input.
-        :param x: (torch.Tensor) input to network.
-        :param available_actions: (torch.Tensor) denotes which actions are available to agent
-                                  (if None, all actions available)
-        :param deterministic: (bool) whether to sample from action distribution or return the mode.
-
-        :return actions: (torch.Tensor) actions to take.
-        :return action_log_probs: (torch.Tensor) log probabilities of taken actions.
         """
-        if self.mixed_action :
+        # 判断是混合动作空间、多维离散动作空间，还是单一动作空间，并基于此生成动作和对数概率
+        if self.mixed_action:
             actions = []
             action_log_probs = []
             for action_out in self.action_outs:
                 action_logit = action_out(x)
+                # 若为 deterministic，直接取均值/众数，否则通过分布采样动作
                 action = action_logit.mode() if deterministic else action_logit.sample()
                 action_log_prob = action_logit.log_probs(action)
                 actions.append(action.float())
                 action_log_probs.append(action_log_prob)
 
             actions = torch.cat(actions, -1)
-            action_log_probs = torch.sum(torch.cat(action_log_probs, -1), -1, keepdim=True)
+            action_log_probs = torch.sum(
+                torch.cat(action_log_probs, -1), -1, keepdim=True)
 
         elif self.multi_discrete:
             actions = []
@@ -74,22 +76,19 @@ class ACTLayer(nn.Module):
 
             actions = torch.cat(actions, -1)
             action_log_probs = torch.cat(action_log_probs, -1)
-        
+
         else:
+            # 常见情况（连续动作或单一离散动作空间）
             action_logits = self.action_out(x, available_actions)
-            actions = action_logits.mode() if deterministic else action_logits.sample() 
-            action_log_probs = action_logits.log_probs(actions)
-        
+            action = action_logits.mode() if deterministic else action_logits.sample()
+            action_log_probs = action_logits.log_probs(action)
+            actions = action
+
         return actions, action_log_probs
 
     def get_probs(self, x, available_actions=None):
         """
         Compute action probabilities from inputs.
-        :param x: (torch.Tensor) input to network.
-        :param available_actions: (torch.Tensor) denotes which actions are available to agent
-                                  (if None, all actions available)
-
-        :return action_probs: (torch.Tensor)
         """
         if self.mixed_action or self.multi_discrete:
             action_probs = []
@@ -101,40 +100,36 @@ class ACTLayer(nn.Module):
         else:
             action_logits = self.action_out(x, available_actions)
             action_probs = action_logits.probs
-        
+
         return action_probs
 
     def evaluate_actions(self, x, action, available_actions=None, active_masks=None):
         """
         Compute log probability and entropy of given actions.
-        :param x: (torch.Tensor) input to network.
-        :param action: (torch.Tensor) actions whose entropy and log probability to evaluate.
-        :param available_actions: (torch.Tensor) denotes which actions are available to agent
-                                                              (if None, all actions available)
-        :param active_masks: (torch.Tensor) denotes whether an agent is active or dead.
-
-        :return action_log_probs: (torch.Tensor) log probabilities of the input actions.
-        :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
         """
+        # 计算指定动作在新策略下的对数概率值与分布熵值（用于更新 Actor 网络）
         if self.mixed_action:
             a, b = action.split((2, 1), -1)
             b = b.long()
-            action = [a, b] 
-            action_log_probs = [] 
+            action = [a, b]
+            action_log_probs = []
             dist_entropy = []
             for action_out, act in zip(self.action_outs, action):
                 action_logit = action_out(x)
                 action_log_probs.append(action_logit.log_probs(act))
                 if active_masks is not None:
                     if len(action_logit.entropy().shape) == len(active_masks.shape):
-                        dist_entropy.append((action_logit.entropy() * active_masks).sum()/active_masks.sum()) 
+                        dist_entropy.append(
+                            (action_logit.entropy() * active_masks).sum()/active_masks.sum())
                     else:
-                        dist_entropy.append((action_logit.entropy() * active_masks.squeeze(-1)).sum()/active_masks.sum())
+                        dist_entropy.append(
+                            (action_logit.entropy() * active_masks.squeeze(-1)).sum()/active_masks.sum())
                 else:
                     dist_entropy.append(action_logit.entropy().mean())
-                
-            action_log_probs = torch.sum(torch.cat(action_log_probs, -1), -1, keepdim=True)
-            dist_entropy = dist_entropy[0] / 2.0 + dist_entropy[1] / 0.98 
+
+            action_log_probs = torch.sum(
+                torch.cat(action_log_probs, -1), -1, keepdim=True)
+            dist_entropy = dist_entropy[0] / 2.0 + dist_entropy[1] / 0.98
 
         elif self.multi_discrete:
             action = torch.transpose(action, 0, 1)
@@ -144,39 +139,35 @@ class ACTLayer(nn.Module):
                 action_logit = action_out(x)
                 action_log_probs.append(action_logit.log_probs(act))
                 if active_masks is not None:
-                    dist_entropy.append((action_logit.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum())
+                    dist_entropy.append(
+                        (action_logit.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum())
                 else:
                     dist_entropy.append(action_logit.entropy().mean())
 
-            action_log_probs = torch.cat(action_log_probs, -1) 
+            action_log_probs = torch.cat(action_log_probs, -1)
             dist_entropy = torch.tensor(dist_entropy).mean()
-        
+
         else:
             action_logits = self.action_out(x, available_actions)
             action_log_probs = action_logits.log_probs(action)
             if active_masks is not None:
-                if self.action_type=="Discrete":
-                    dist_entropy = (action_logits.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum()
+                # 对有效掩码状态下的熵求加权平均值
+                if self.action_type == "Discrete":
+                    dist_entropy = (action_logits.entropy(
+                    )*active_masks.squeeze(-1)).sum()/active_masks.sum()
                 else:
-                    dist_entropy = (action_logits.entropy()*active_masks).sum()/active_masks.sum()
+                    dist_entropy = (action_logits.entropy() *
+                                    active_masks).sum()/active_masks.sum()
             else:
                 dist_entropy = action_logits.entropy().mean()
-        
+
         return action_log_probs, dist_entropy
 
     def evaluate_actions_trpo(self, x, action, available_actions=None, active_masks=None):
         """
         Compute log probability and entropy of given actions.
-        :param x: (torch.Tensor) input to network.
-        :param action: (torch.Tensor) actions whose entropy and log probability to evaluate.
-        :param available_actions: (torch.Tensor) denotes which actions are available to agent
-                                                              (if None, all actions available)
-        :param active_masks: (torch.Tensor) denotes whether an agent is active or dead.
-
-        :return action_log_probs: (torch.Tensor) log probabilities of the input actions.
-        :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
         """
-
+        # 供 TRPO/HATRPO 评估动作概率、分布的均值(mean)和方差(stddev)以计算 KL 散度
         if self.multi_discrete:
             action = torch.transpose(action, 0, 1)
             action_log_probs = []
@@ -193,30 +184,33 @@ class ACTLayer(nn.Module):
                 std_collector.append(std)
                 probs_collector.append(action_logit.logits)
                 if active_masks is not None:
-                    dist_entropy.append((action_logit.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum())
+                    dist_entropy.append(
+                        (action_logit.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum())
                 else:
                     dist_entropy.append(action_logit.entropy().mean())
-            action_mu = torch.cat(mu_collector,-1)
-            action_std = torch.cat(std_collector,-1)
-            all_probs = torch.cat(probs_collector,-1)
+            action_mu = torch.cat(mu_collector, -1)
+            action_std = torch.cat(std_collector, -1)
+            all_probs = torch.cat(probs_collector, -1)
             action_log_probs = torch.cat(action_log_probs, -1)
             dist_entropy = torch.tensor(dist_entropy).mean()
-        
+
         else:
             action_logits = self.action_out(x, available_actions)
             action_mu = action_logits.mean
             action_std = action_logits.stddev
             action_log_probs = action_logits.log_probs(action)
-            if self.action_type=="Discrete":
+            if self.action_type == "Discrete":
                 all_probs = action_logits.logits
             else:
                 all_probs = None
             if active_masks is not None:
-                if self.action_type=="Discrete":
-                    dist_entropy = (action_logits.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum()
+                if self.action_type == "Discrete":
+                    dist_entropy = (action_logits.entropy(
+                    )*active_masks.squeeze(-1)).sum()/active_masks.sum()
                 else:
-                    dist_entropy = (action_logits.entropy()*active_masks).sum()/active_masks.sum()
+                    dist_entropy = (action_logits.entropy() *
+                                    active_masks).sum()/active_masks.sum()
             else:
                 dist_entropy = action_logits.entropy().mean()
-        
+
         return action_log_probs, dist_entropy, action_mu, action_std, all_probs

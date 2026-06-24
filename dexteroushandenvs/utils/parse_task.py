@@ -10,9 +10,10 @@ from tasks.allegro_hand_dynamic_handover import AllegroHandDynamicHandover
 from tasks.hand_base.multi_vec_task_allegro import MultiVecTaskPythonAllegro
 from utils.config import warn_task_name
 
+
 def parse_task(args, cfg, cfg_train, sim_params, agent_index):
 
-    # create native task and pass custom config
+    # 获取执行的设备信息
     device_id = args.device_id
     rl_device = args.rl_device
 
@@ -24,6 +25,7 @@ def parse_task(args, cfg, cfg_train, sim_params, agent_index):
         print("Task type: MultiAgent")
 
         try:
+            # 实例化具体的 Isaac Gym 多智能体物理仿真任务：双灵巧手动态交接
             task = AllegroHandDynamicHandover(
                 cfg=cfg,
                 sim_params=sim_params,
@@ -36,6 +38,7 @@ def parse_task(args, cfg, cfg_train, sim_params, agent_index):
         except NameError as e:
             print(e)
             warn_task_name()
+        # 将底层任务类用 MultiVecTaskPythonAllegro 包装成支持 PyTorch 矢量化数据交互的强化学习环境
         env = MultiVecTaskPythonAllegro(task, rl_device)
 
         return task, env

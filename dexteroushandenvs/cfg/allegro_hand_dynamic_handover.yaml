@@ -38,7 +38,8 @@ env:
   handAgentIndex: "[[0, 1, 2, 3, 4, 5]]"
   asymmetric_observations: True
   successTolerance: 0.1
-  printNumSuccesses: False
+  # printNumSuccesses: False
+  printNumSuccesses: True
   maxConsecutiveSuccesses: 0
 
   asset:

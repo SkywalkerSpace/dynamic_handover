@@ -15,6 +15,7 @@ def compute_heading_and_up(
     torso_rotation, inv_start_rot, to_target, vec0, vec1, up_idx
 ):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
+    # 计算身体朝向、上方向投影和朝向目标的投影，供奖励函数或观测构造使用
     num_envs = torso_rotation.shape[0]
     target_dirs = normalize(to_target)
 
@@ -30,6 +31,7 @@ def compute_heading_and_up(
 
 @torch.jit.script
 def compute_rot(torso_quat, velocity, ang_velocity, targets, torso_positions):
+    # 把速度变换到本体坐标系，并计算朝向目标的角度误差
     vel_loc = quat_rotate_inverse(torso_quat, velocity)
     angvel_loc = quat_rotate_inverse(torso_quat, ang_velocity)
 
@@ -45,6 +47,7 @@ def compute_rot(torso_quat, velocity, ang_velocity, targets, torso_positions):
 @torch.jit.script
 def quat_axis(q, axis=0):
     # type: (Tensor, int) -> Tensor
+    # 取四元数旋转后的某个基轴方向
     basis_vec = torch.zeros(q.shape[0], 3, device=q.device)
     basis_vec[:, axis] = 1
     return quat_rotate(q, basis_vec)

@@ -18,6 +18,7 @@ import torch
 
 
 def set_np_formatting():
+    # 统一 numpy 打印格式，方便调试时查看大数组
     np.set_printoptions(
         edgeitems=30,
         infstr='inf',
@@ -31,16 +32,19 @@ def set_np_formatting():
 
 
 def warn_task_name():
+    # 任务名不匹配时直接报错，提醒用户检查配置
     raise Exception("Unrecognized task!")
 
 
 def warn_algorithm_name():
+    # 算法名不匹配时直接报错，避免进入错误分支
     raise Exception(
         "Unrecognized algorithm!\nAlgorithm should be one of: [ppo, happo, hatrpo, mappo]"
     )
 
 
 def set_seed(seed, torch_deterministic=False):
+    # 统一设置 Python、NumPy 和 PyTorch 的随机种子，尽量保证实验可复现
     if seed == -1 and torch_deterministic:
         seed = 42
     elif seed == -1:
@@ -68,10 +72,12 @@ def set_seed(seed, torch_deterministic=False):
 
 
 def retrieve_cfg(args, use_rlg_config=False):
+    # 根据任务和算法名推导训练配置和环境配置文件路径
     if args.task == "AllegroHandDynamicHandover":
         return (
             os.path.join(
-                args.logdir, "allegro_hand_dynamic_handover/{}/{}".format(args.algo, args.algo)
+                args.logdir, "allegro_hand_dynamic_handover/{}/{}".format(
+                    args.algo, args.algo)
             ),
             "cfg/{}/config.yaml".format(args.algo),
             "cfg/allegro_hand_dynamic_handover.yaml",
@@ -81,6 +87,7 @@ def retrieve_cfg(args, use_rlg_config=False):
 
 
 def load_cfg(args, use_rlg_config=False):
+    # 读取 YAML 配置，并把命令行参数覆盖到配置中
     with open(os.path.join(os.getcwd(), args.cfg_train), 'r') as f:
         cfg_train = yaml.load(f, Loader=yaml.SafeLoader)
 
@@ -88,6 +95,7 @@ def load_cfg(args, use_rlg_config=False):
         cfg = yaml.load(f, Loader=yaml.SafeLoader)
 
     # Override number of environments if passed on the command line
+    # 命令行参数优先，覆盖环境数量和回合长度
     if args.num_envs > 0:
         cfg["env"]["numEnvs"] = args.num_envs
 
@@ -98,6 +106,7 @@ def load_cfg(args, use_rlg_config=False):
     cfg["headless"] = args.headless
 
     # Set physics domain randomization
+    # 统一处理域随机化开关，确保 task 配置和命令行保持一致
     if "task" in cfg:
         if "randomize" not in cfg["task"]:
             cfg["task"]["randomize"] = args.randomize
@@ -109,6 +118,7 @@ def load_cfg(args, use_rlg_config=False):
     logdir = args.logdir
     if use_rlg_config:
         # Set deterministic mode
+        # rl_games 分支：同步确定性设置、训练轮数、seed 和 checkpoint
         if args.torch_deterministic:
             cfg_train["params"]["torch_deterministic"] = True
 
@@ -129,6 +139,7 @@ def load_cfg(args, use_rlg_config=False):
                 exp_name = args.experiment
 
         # Override config name
+        # 根据实验名覆盖配置中的 run name
         cfg_train["params"]["config"]['name'] = exp_name
 
         if args.resume > 0:
@@ -138,6 +149,7 @@ def load_cfg(args, use_rlg_config=False):
             cfg_train["params"]["load_path"] = args.checkpoint
 
         # Set maximum number of training iterations (epochs)
+        # 覆盖最大训练轮数
         if args.max_iterations > 0:
             cfg_train["params"]["config"]['max_epochs'] = args.max_iterations
 
@@ -152,6 +164,7 @@ def load_cfg(args, use_rlg_config=False):
         cfg["args"] = args
     else:
         # Set deterministic mode
+        # 非 rl_games 分支：只做最基础的覆盖逻辑
         if args.torch_deterministic:
             cfg_train["torch_deterministic"] = True
 
@@ -181,6 +194,7 @@ def load_cfg(args, use_rlg_config=False):
 
 def parse_sim_params(args, cfg, cfg_train):
     # initialize sim
+    # 初始化仿真参数，并根据物理引擎类型设置默认值
     sim_params = gymapi.SimParams()
     sim_params.dt = 1.0 / 60.0
     sim_params.num_client_threads = args.slices
@@ -204,6 +218,7 @@ def parse_sim_params(args, cfg, cfg_train):
     sim_params.physx.use_gpu = args.use_gpu
 
     # if sim options are provided in cfg, parse them and update/override above:
+    # 如果 YAML 里提供了 sim 配置，则解析并覆盖默认值
     if "sim" in cfg:
         gymutil.parse_sim_config(cfg["sim"], sim_params)
 
@@ -215,6 +230,7 @@ def parse_sim_params(args, cfg, cfg_train):
 
 
 def get_args(benchmark=False, use_rlg_config=False):
+    # 定义命令行参数，并补齐 benchmark 模式下的额外参数
     custom_parameters = [
         {
             "name": "--test",
@@ -258,7 +274,8 @@ def get_args(benchmark=False, use_rlg_config=False):
             "default": "ShadowHandOver",
             "help": "Can be BallBalance, Cartpole, CartpoleYUp, Ant, Humanoid, Anymal, FrankaCabinet, Quadcopter, ShadowHand, Ingenuity",
         },
-        {"name": "--task_type", "type": str, "default": "Python", "help": "Choose Python or C++"},
+        {"name": "--task_type", "type": str,
+            "default": "Python", "help": "Choose Python or C++"},
         {
             "name": "--rl_device",
             "type": str,
@@ -323,8 +340,10 @@ def get_args(benchmark=False, use_rlg_config=False):
             "default": False,
             "help": "Apply additional PyTorch settings for more deterministic behaviour",
         },
-        {"name": "--algo", "type": str, "default": "maddpg", "help": "Choose an algorithm"},
-        {"name": "--model_dir", "type": str, "default": "", "help": "Choose a model dir"},
+        {"name": "--algo", "type": str, "default": "maddpg",
+            "help": "Choose an algorithm"},
+        {"name": "--model_dir", "type": str,
+            "default": "", "help": "Choose a model dir"},
         {
             "name": "--before_checkpoint",
             "type": str,
@@ -337,7 +356,8 @@ def get_args(benchmark=False, use_rlg_config=False):
             "default": "",
             "help": "Only for policy sequencing",
         },
-        {"name": "--record_video", "type": bool, "default": False, "help": "Record video"},
+        {"name": "--record_video", "type": bool,
+            "default": False, "help": "Record video"},
         {
             "name": "--record_video_interval",
             "type": int,
@@ -365,7 +385,8 @@ def get_args(benchmark=False, use_rlg_config=False):
                 "action": "store_true",
                 "help": "Run benchmark with random actions instead of inferencing",
             },
-            {"name": "--bench_len", "type": int, "default": 10, "help": "Number of timing reports"},
+            {"name": "--bench_len", "type": int, "default": 10,
+                "help": "Number of timing reports"},
             {
                 "name": "--bench_file",
                 "action": "store",
@@ -374,9 +395,12 @@ def get_args(benchmark=False, use_rlg_config=False):
         ]
 
     # parse arguments
-    args = gymutil.parse_arguments(description="RL Policy", custom_parameters=custom_parameters)
+    # 解析命令行参数
+    args = gymutil.parse_arguments(
+        description="RL Policy", custom_parameters=custom_parameters)
 
     # allignment with examples
+    # 与 Isaac Gym 示例脚本保持兼容的字段名
     args.device_id = args.compute_device_id
     args.device = args.sim_device_type if args.use_gpu_pipeline else 'cpu'
 
@@ -400,13 +424,15 @@ def get_args(benchmark=False, use_rlg_config=False):
                 "Setting number of simulation steps per iteration from command line is not supported by rl-pytorch."
             )
         if args.minibatch_size != -1:
-            print("Setting minibatch size from command line is not supported by rl-pytorch.")
+            print(
+                "Setting minibatch size from command line is not supported by rl-pytorch.")
         if args.checkpoint != "Base":
             raise ValueError(
                 "--checkpoint is not supported by rl-pytorch. Please use --resume <iteration number>"
             )
 
     # use custom parameters if provided by user
+    # 如果用户没有显式指定路径，则使用自动推导出的配置路径
     if args.logdir == "logs/":
         args.logdir = logdir
 

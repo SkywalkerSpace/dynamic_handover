@@ -2,6 +2,7 @@ import torch.nn as nn
 from .util import init, get_clones
 
 """MLP modules."""
+"""MLP 相关模块。"""
 
 class MLPLayer(nn.Module):
     def __init__(self, input_dim, hidden_size, layer_N, use_orthogonal, use_ReLU):
@@ -9,8 +10,10 @@ class MLPLayer(nn.Module):
         self._layer_N = layer_N
 
         # active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
+        # 这里保留 ELU 作为激活函数，和原始实现的风格保持一致
         active_func = [nn.ELU(), nn.ELU()][use_ReLU]
-        init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
+        init_method = [nn.init.xavier_uniform_,
+                       nn.init.orthogonal_][use_orthogonal]
         gain = nn.init.calculate_gain(['tanh', 'relu'][use_ReLU])
 
         def init_(m):
@@ -29,6 +32,7 @@ class MLPLayer(nn.Module):
         #     nn.Linear(hidden_size, hidden_size)), active_func) for i in range(self._layer_N)])
 
     def forward(self, x):
+        # 先过一层输入映射，再堆叠多层隐藏层
         x = self.fc1(x)
         for i in range(self._layer_N):
             x = self.fc2[i](x)
@@ -52,11 +56,12 @@ class MLPBase(nn.Module):
             self.feature_norm = nn.LayerNorm(obs_dim)
 
         self.mlp = MLPLayer(obs_dim, self.hidden_size,
-                              self._layer_N, self._use_orthogonal, self._use_ReLU)
+                            self._layer_N, self._use_orthogonal, self._use_ReLU)
         # self.mlp_middle_layer = MLPLayer(self.hidden_size, self.hidden_size,
         #                       self._layer_N, self._use_orthogonal, self._use_ReLU)
 
     def forward(self, x):
+        # 可选的特征归一化后，再进入 MLP 主干
         if self._use_feature_normalization:
             x = self.feature_norm(x)
 

@@ -32,17 +32,21 @@ class MAPPO_Policy:
         self.share_obs_space = cent_obs_space
         self.act_space = act_space
 
+        # 实例化 Actor 网络（策略网络）和 Critic 网络（价值网络）
         self.actor = Actor(config, self.obs_space, self.act_space, self.device)
         self.critic = Critic(config, self.share_obs_space, self.device)
         print(self.actor)
         print(self.critic)
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
-                                                lr=self.lr, eps=self.opti_eps,
-                                                weight_decay=self.weight_decay)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
-                                                 lr=self.critic_lr,
-                                                 eps=self.opti_eps,
-                                                 weight_decay=self.weight_decay)
+        # 初始化 Actor 和 Critic 网络对应的 Adam 优化器
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(),
+            lr=self.lr, eps=self.opti_eps,
+            weight_decay=self.weight_decay)
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(),
+            lr=self.critic_lr,
+            eps=self.opti_eps,
+            weight_decay=self.weight_decay)
 
     def lr_decay(self, episode, episodes):
         """
@@ -50,8 +54,11 @@ class MAPPO_Policy:
         :param episode: (int) current training episode.
         :param episodes: (int) total number of training episodes.
         """
-        update_linear_schedule(self.actor_optimizer, episode, episodes, self.lr)
-        update_linear_schedule(self.critic_optimizer, episode, episodes, self.critic_lr)
+        # 对 Actor 和 Critic 的学习率执行线性衰减以促进后期收敛
+        update_linear_schedule(self.actor_optimizer,
+                               episode, episodes, self.lr)
+        update_linear_schedule(self.critic_optimizer,
+                               episode, episodes, self.critic_lr)
 
     def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None,
                     deterministic=False):
@@ -72,13 +79,17 @@ class MAPPO_Policy:
         :return rnn_states_actor: (torch.Tensor) updated actor network RNN states.
         :return rnn_states_critic: (torch.Tensor) updated critic network RNN states.
         """
-        actions, action_log_probs, rnn_states_actor = self.actor(obs,
-                                                                 rnn_states_actor,
-                                                                 masks,
-                                                                 available_actions,
-                                                                 deterministic)
+        # Actor 网络向前传播，生成动作 (actions)、动作对数概率 (action_log_probs) 以及新的 RNN 状态
+        actions, action_log_probs, rnn_states_actor = self.actor(
+            obs,
+            rnn_states_actor,
+            masks,
+            available_actions,
+            deterministic)
 
-        values, rnn_states_critic = self.critic(cent_obs, rnn_states_critic, masks)
+        # Critic 网络向前传播，根据集中式/全局观察输入，评估当前状态下的价值预测 (values)
+        values, rnn_states_critic = self.critic(
+            cent_obs, rnn_states_critic, masks)
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic
 
     def get_values(self, cent_obs, rnn_states_critic, masks):
@@ -90,6 +101,7 @@ class MAPPO_Policy:
 
         :return values: (torch.Tensor) value function predictions.
         """
+        # 仅通过 Critic 价值网络估算状态价值（用于 GAE 返回值的估计）
         values, _ = self.critic(cent_obs, rnn_states_critic, masks)
         return values
 
@@ -111,13 +123,16 @@ class MAPPO_Policy:
         :return action_log_probs: (torch.Tensor) log probabilities of the input actions.
         :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
         """
-        action_log_probs, dist_entropy = self.actor.evaluate_actions(obs,
-                                                                     rnn_states_actor,
-                                                                     action,
-                                                                     masks,
-                                                                     available_actions,
-                                                                     active_masks)
+        # 计算在当前更新步中，已采取动作的对数概率 (action_log_probs) 以及策略分布熵 (dist_entropy)
+        action_log_probs, dist_entropy = self.actor.evaluate_actions(
+            obs,
+            rnn_states_actor,
+            action,
+            masks,
+            available_actions,
+            active_masks)
 
+        # 获取对应的状态价值估计
         values, _ = self.critic(cent_obs, rnn_states_critic, masks)
         return values, action_log_probs, dist_entropy
 
@@ -131,5 +146,7 @@ class MAPPO_Policy:
                                   (if None, all actions available)
         :param deterministic: (bool) whether the action should be mode of distribution or should be sampled.
         """
-        actions, _, rnn_states_actor = self.actor(obs, rnn_states_actor, masks, available_actions, deterministic)
+        # 只生成动作，不生成价值预测（在测试/评估流程中被 Runner.eval() 调用）
+        actions, _, rnn_states_actor = self.actor(
+            obs, rnn_states_actor, masks, available_actions, deterministic)
         return actions, rnn_states_actor

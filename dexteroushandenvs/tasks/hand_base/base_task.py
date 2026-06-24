@@ -22,9 +22,11 @@ from isaacgym import gymapi
 from isaacgym.torch_utils import *
 
 # Base class for RL tasks
+# RL 任务的基础类，负责环境创建、仿真推进、渲染和随机化管理
 class BaseTask():
 
     def __init__(self, cfg, enable_camera_sensors=False, is_meta=False, task_num=0):
+        # 从 Isaac Gym 获取全局 gym 接口，并读取设备、环境数量和观测维度等配置
         self.gym = gymapi.acquire_gym()
         self.enable_camera_sensors = enable_camera_sensors
 
@@ -53,10 +55,12 @@ class BaseTask():
         self.control_freq_inv = cfg["env"].get("controlFrequencyInv", 1)
 
         # optimization flags for pytorch JIT
+        # 关闭 JIT 的 profiling，减少运行时额外开销
         torch._C._jit_set_profiling_mode(False)
         torch._C._jit_set_profiling_executor(False)
 
         # allocate buffers
+        # 预分配张量缓存，用于观测、奖励、重置标记和进度统计
         self.obs_buf = torch.zeros(
             (self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
         self.states_buf = torch.zeros(
@@ -83,6 +87,7 @@ class BaseTask():
         self.last_rand_step = -1
 
         # create envs, sim and viewer
+        # 创建仿真和视图窗口，并让 Isaac Gym 完成底层资源初始化
         self.create_sim()
         self.gym.prepare_sim(self.sim)
 
@@ -91,8 +96,10 @@ class BaseTask():
         self.viewer = None
 
         # if running with a viewer, set up keyboard shortcuts and camera
+        # 如果启用了可视化窗口，则绑定键盘事件并设置默认相机位置
         if self.headless == False:
             # subscribe to keyboard shortcuts
+            # 订阅快捷键
             self.viewer = self.gym.create_viewer(
                 self.sim, gymapi.CameraProperties())
             self.gym.subscribe_viewer_keyboard_event(
@@ -131,6 +138,7 @@ class BaseTask():
 
     # set gravity based on up axis and return axis index
     def set_sim_params_up_axis(self, sim_params, axis):
+        # 根据“朝上轴”配置重力方向，并返回对应的轴索引
         if axis == 'z':
             sim_params.up_axis = gymapi.UP_AXIS_Z
             sim_params.gravity.x = 0
@@ -140,6 +148,7 @@ class BaseTask():
         return 1
 
     def create_sim(self, compute_device, graphics_device, physics_engine, sim_params):
+        # 向 Isaac Gym 请求创建仿真实例，失败则直接退出
         sim = self.gym.create_sim(compute_device, graphics_device, physics_engine, sim_params)
         if sim is None:
             print("*** Failed to create sim")
@@ -148,22 +157,27 @@ class BaseTask():
         return sim
 
     def step(self, actions):
+        # 先对动作做随机扰动，再将动作送入物理步进流程
         if self.dr_randomizations.get('actions', None):
             actions = self.dr_randomizations['actions']['noise_lambda'](actions)
 
         # apply actions
+        # 施加动作，执行控制器更新
         self.pre_physics_step(actions)
 
         # step physics and render each frame
+        # 按控制频率推进物理仿真，并在每个子步中刷新渲染
         for i in range(self.control_freq_inv):
             self.render()
             self.gym.simulate(self.sim)
 
         # to fix!
+        # CPU 模式下需要显式拉取仿真结果
         if self.device == 'cpu':
             self.gym.fetch_results(self.sim, True)
 
         # compute observations, rewards, resets, ...
+        # 计算新一轮观测、奖励和重置条件
         self.post_physics_step()
 
         if self.dr_randomizations.get('observations', None):
@@ -175,10 +189,12 @@ class BaseTask():
     def render(self, sync_frame_time=False):
         if self.viewer:
             # check for window closed
+            # 检查窗口是否被用户关闭
             if self.gym.query_viewer_has_closed(self.viewer):
                 sys.exit()          
 
             # check for keyboard events
+            # 处理键盘事件，比如退出和切换同步显示
             for evt in self.gym.query_viewer_action_events(self.viewer):
                 if evt.action == "QUIT" and evt.value > 0:
                     if self.record_sim_scene:
@@ -191,10 +207,12 @@ class BaseTask():
                     self.enable_viewer_sync = not self.enable_viewer_sync
 
             # fetch results
+            # 非 CPU 设备需要先取回仿真结果再做显示
             if self.device != 'cpu':
                 self.gym.fetch_results(self.sim, True)
 
             # step graphics
+            # 刷新图形并绘制当前帧
             if self.enable_viewer_sync:
                 self.gym.step_graphics(self.sim)
                 self.gym.draw_viewer(self.viewer, self.sim, True)
@@ -202,6 +220,7 @@ class BaseTask():
                 self.gym.poll_viewer_events(self.viewer)
 
         if self.record_sim_scene:
+            # 记录当前帧的 root state 和 dof state，便于后续回放或分析
             self.gym.refresh_actor_root_state_tensor(self.sim)
             self.gym.refresh_dof_state_tensor(self.sim)
             self.sim_scene_recorder["dof_state"].append(gymtorch.wrap_tensor(self.f_dof_state_tensor).clone())
@@ -211,10 +230,12 @@ class BaseTask():
 
     def render_for_camera(self, sync_frame_time=False):
         # fetch results
+        # 拉取物理仿真结果
         if self.device != 'cpu':
             self.gym.fetch_results(self.sim, True)
 
         # step graphics
+        # 只刷新图形，不处理额外的 viewer 交互
         if self.enable_viewer_sync:
             self.gym.step_graphics(self.sim)
             self.gym.draw_viewer(self.viewer, self.sim, True)
@@ -225,6 +246,7 @@ class BaseTask():
         """Returns a flat array of actor params, their names and ranges."""
         if "actor_params" not in dr_params:
             return None
+        # 展平 actor 随机化参数，收集当前值、名字和取值范围，便于记录和调试
         params = []
         names = []
         lows = []
@@ -235,6 +257,7 @@ class BaseTask():
             for prop_name, prop_attrs in actor_properties.items():
                 if prop_name == 'color':
                     continue  # this is set randomly
+                # 颜色由随机逻辑单独设置，不作为常规参数读取
                 props = param_getters_map[prop_name](env, handle)
                 if not isinstance(props, list):
                     props = [props]
@@ -261,12 +284,17 @@ class BaseTask():
     # Apply randomizations only on resets, due to current PhysX limitations
     def apply_randomizations(self, dr_params):
         # If we don't have a randomization frequency, randomize every step
+        # 如果没有显式频率，则默认每一步都允许随机化
         rand_freq = dr_params.get("frequency", 1)
 
         # First, determine what to randomize:
         #   - non-environment parameters when > frequency steps have passed since the last non-environment
         #   - physical environments in the reset buffer, which have exceeded the randomization frequency threshold
         #   - on the first call, randomize everything
+        # 先判断本轮需要随机化哪些内容：
+        #   - 非环境参数：距离上次随机化是否已经超过频率阈值
+        #   - 环境参数：只对满足重置条件且超过频率阈值的环境生效
+        #   - 第一次调用时，直接对所有内容做一次随机化
         self.last_step = self.gym.get_frame_count(self.sim)
         if self.first_randomization:
             do_nonenv_randomize = True
@@ -286,6 +314,7 @@ class BaseTask():
         param_getters_map = get_property_getter_map(self.gym)
 
         # On first iteration, check the number of buckets
+        # 第一次随机化时，先检查 bucket 数量是否满足要求
         if self.first_randomization:
             check_buckets(self.gym, self.envs, dr_params)
 
@@ -380,6 +409,8 @@ class BaseTask():
         # freedom to generate samples from arbitrary distributions,
         # e.g. use full-covariance distributions instead of the DR's
         # default of treating each simulation parameter independently.
+        # 如果提供了外部参数采样器，就从任意分布中采样 actor 参数，
+        # 这样可以支持比默认逐项独立随机化更灵活的分布形式
         extern_offsets = {}
         if self.actor_params_generator is not None:
             for env_id in env_ids:
@@ -445,6 +476,7 @@ class BaseTask():
 
         if self.actor_params_generator is not None:
             for env_id in env_ids:  # check that we used all dims in sample
+                # 检查每个样本维度是否都被消费完
                 if extern_offsets[env_id] > 0:
                     extern_sample = self.extern_actor_params[env_id]
                     if extern_offsets[env_id] != extern_sample.shape[0]:
@@ -456,9 +488,11 @@ class BaseTask():
         self.first_randomization = False
 
     def pre_physics_step(self, actions):
+        # 子类实现：在物理步进前把动作写入仿真控制器
         raise NotImplementedError
 
     def post_physics_step(self):
+        # 子类实现：在物理步进后更新观测、奖励和重置逻辑
         raise NotImplementedError
 
 

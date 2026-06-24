@@ -2,9 +2,12 @@ import torch.nn as nn
 from .util import init
 
 """CNN Modules and utils."""
+"""CNN 相关模块与辅助层。"""
+
 
 class Flatten(nn.Module):
     def forward(self, x):
+        # 把卷积特征展平为二维张量，供全连接层使用
         return x.view(x.size(0), -1)
 
 
@@ -13,7 +16,8 @@ class CNNLayer(nn.Module):
         super(CNNLayer, self).__init__()
 
         active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
-        init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
+        init_method = [nn.init.xavier_uniform_,
+                       nn.init.orthogonal_][use_orthogonal]
         gain = nn.init.calculate_gain(['tanh', 'relu'][use_ReLU])
 
         def init_(m):
@@ -38,6 +42,7 @@ class CNNLayer(nn.Module):
             init_(nn.Linear(hidden_size, hidden_size)), active_func)
 
     def forward(self, x):
+        # 图像观测通常是 0-255，先归一化再送入卷积网络
         x = x / 255.0
         x = self.cnn(x)
         return x
@@ -51,8 +56,10 @@ class CNNBase(nn.Module):
         self._use_ReLU = args.use_ReLU
         self.hidden_size = args.hidden_size
 
-        self.cnn = CNNLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
+        self.cnn = CNNLayer(obs_shape, self.hidden_size,
+                            self._use_orthogonal, self._use_ReLU)
 
     def forward(self, x):
+        # 对外只暴露特征提取后的向量表示
         x = self.cnn(x)
         return x

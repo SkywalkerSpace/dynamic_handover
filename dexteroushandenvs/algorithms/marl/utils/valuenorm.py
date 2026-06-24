@@ -18,10 +18,13 @@ class ValueNorm(nn.Module):
         self.per_element_update = per_element_update
         self.tpdv = dict(dtype=torch.float32, device=device)
 
-        self.running_mean = nn.Parameter(torch.zeros(input_shape), requires_grad=False).to(**self.tpdv)
-        self.running_mean_sq = nn.Parameter(torch.zeros(input_shape), requires_grad=False).to(**self.tpdv)
-        self.debiasing_term = nn.Parameter(torch.tensor(0.0), requires_grad=False).to(**self.tpdv)
-        
+        self.running_mean = nn.Parameter(torch.zeros(
+            input_shape), requires_grad=False).to(**self.tpdv)
+        self.running_mean_sq = nn.Parameter(torch.zeros(
+            input_shape), requires_grad=False).to(**self.tpdv)
+        self.debiasing_term = nn.Parameter(torch.tensor(
+            0.0), requires_grad=False).to(**self.tpdv)
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -30,19 +33,23 @@ class ValueNorm(nn.Module):
         self.debiasing_term.zero_()
 
     def running_mean_var(self):
-        debiased_mean = self.running_mean / self.debiasing_term.clamp(min=self.epsilon)
-        debiased_mean_sq = self.running_mean_sq / self.debiasing_term.clamp(min=self.epsilon)
+        debiased_mean = self.running_mean / \
+            self.debiasing_term.clamp(min=self.epsilon)
+        debiased_mean_sq = self.running_mean_sq / \
+            self.debiasing_term.clamp(min=self.epsilon)
         debiased_var = (debiased_mean_sq - debiased_mean ** 2).clamp(min=1e-2)
         return debiased_mean, debiased_var
 
     @torch.no_grad()
     def update(self, input_vector):
+        # 使用当前批次的输入数据，平滑地更新均值和方差的滑动估计值
         if type(input_vector) == np.ndarray:
             input_vector = torch.from_numpy(input_vector)
         input_vector = input_vector.to(**self.tpdv)
 
         batch_mean = input_vector.mean(dim=tuple(range(self.norm_axes)))
-        batch_sq_mean = (input_vector ** 2).mean(dim=tuple(range(self.norm_axes)))
+        batch_sq_mean = (
+            input_vector ** 2).mean(dim=tuple(range(self.norm_axes)))
 
         if self.per_element_update:
             batch_size = np.prod(input_vector.size()[:self.norm_axes])
@@ -55,25 +62,29 @@ class ValueNorm(nn.Module):
         self.debiasing_term.mul_(weight).add_(1.0 * (1.0 - weight))
 
     def normalize(self, input_vector):
-        # Make sure input is float32
+        # 归一化输入张量：(x - mean) / std
         if type(input_vector) == np.ndarray:
             input_vector = torch.from_numpy(input_vector)
         input_vector = input_vector.to(**self.tpdv)
 
         mean, var = self.running_mean_var()
-        out = (input_vector - mean[(None,) * self.norm_axes]) / torch.sqrt(var)[(None,) * self.norm_axes]
-        
+        out = (input_vector - mean[(None,) * self.norm_axes]
+               ) / torch.sqrt(var)[(None,) * self.norm_axes]
+
         return out
 
     def denormalize(self, input_vector):
         """ Transform normalized data back into original distribution """
+        # 反归一化张量：将网络输出的标准预测值，放回原始尺度，供优势估计计算
         if type(input_vector) == np.ndarray:
             input_vector = torch.from_numpy(input_vector)
         input_vector = input_vector.to(**self.tpdv)
 
         mean, var = self.running_mean_var()
-        out = input_vector * torch.sqrt(var)[(None,) * self.norm_axes] + mean[(None,) * self.norm_axes]
-        
+        out = input_vector * \
+            torch.sqrt(var)[(None,) * self.norm_axes] + \
+            mean[(None,) * self.norm_axes]
+
         out = out.detach()
-        
+
         return out
