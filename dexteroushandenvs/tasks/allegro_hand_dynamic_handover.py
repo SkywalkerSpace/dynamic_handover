@@ -841,8 +841,10 @@ class AllegroHandDynamicHandover(BaseTask):
             self.traj_estimator.train()
 
         self.total_steps = 0
+        self.reset_no_fall = 0
         self.success_buf = torch.zeros_like(self.rew_buf)
         self.hit_success_buf = torch.zeros_like(self.rew_buf)
+        self.reset_no_fall_buf = torch.zeros_like(self.rew_buf)
 
     def get_internal_state(self):
         return self.root_state_tensor[self.object_indices, 3:7]
@@ -858,7 +860,7 @@ class AllegroHandDynamicHandover(BaseTask):
 
     def compute_reward(self, actions):
         # 计算当前环境步骤下的综合奖励（包含位置靠近度、方向旋转匹配度、动作控制惩罚、任务成功奖励与掉落惩罚项）
-        self.rew_buf[:], self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_hand_reward(
+        self.rew_buf[:], self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:], self.reset_no_fall_buf[:] = compute_hand_reward(
             self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
             self.max_episode_length, self.object_pos, self.object_rot, self.goal_pos, self.goal_rot, self.allegro_left_hand_pos, self.allegro_right_hand_pos, 
             self.allegro_hand_another_thmub_pos, self.aux_up_pos, self.object_linvel, self.leeft_hand_ee_rot,
@@ -874,8 +876,11 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.extras['successes'] = self.successes
         self.extras['consecutive_successes'] = self.consecutive_successes
+        self.extras['reset_no_fall'] = self.reset_no_fall_buf
 
         self.total_steps += 1
+        if self.reset_no_fall_buf.sum() > 0:
+            self.reset_no_fall += 1
 
         if self.print_success_stat:
             self.total_resets = self.total_resets + self.reset_buf.sum()
@@ -885,6 +890,8 @@ class AllegroHandDynamicHandover(BaseTask):
 
             # The direct average shows the overall result more quickly, but slightly undershoots long term
             # policy performance.
+            print('total_steps', self.total_steps, 'reset_no_fall', self.reset_no_fall,
+                  'reset_no_fall_buf', self.reset_no_fall_buf.sum().item())
             print('successes', self.successes.sum().item(), 'resets', self.reset_buf.sum().item(),
                   'total_resets', self.total_resets.item(), 'total_successes', self.total_successes.item())
             print("Direct average consecutive successes = {:.3f}".format(
@@ -1491,7 +1498,11 @@ def compute_hand_reward(
         num_resets > 0, av_factor*finished_cons_successes /
         num_resets + (1.0 - av_factor)*consecutive_successes, consecutive_successes)
 
-    return reward, resets, goal_resets, progress_buf, successes, cons_successes
+    reset_no_fall = torch.where(
+        (resets == 1) & (object_pos[:, 2] > 0.15),
+        torch.ones_like(resets), torch.zeros_like(resets))
+
+    return reward, resets, goal_resets, progress_buf, successes, cons_successes, reset_no_fall
 
 
 @torch.jit.script

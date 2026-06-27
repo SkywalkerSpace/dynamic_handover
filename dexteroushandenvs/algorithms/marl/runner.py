@@ -464,7 +464,6 @@ class Runner:
 
             try:
                 print('eval_episode: ', eval_episode,
-                      'agent_id: ', agent_id,
                       'eval_average_episode_rewards', torch.mean(
                           torch.cat(eval_episode_rewards, dim=-1)).item(),
                       )
