@@ -12,6 +12,8 @@ import random
 import torch
 import pickle
 
+from torch.utils.tensorboard import SummaryWriter
+
 from utils.torch_jit_utils import *
 # from isaacgym.torch_utils import *
 
@@ -403,6 +405,10 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.predict_pose = self.goal_init_state[:, 0:3].clone()
 
+        self.log_dir = str(
+            './logs/allegro_hand_dynamic_handover/mappo/success_logs_seed22')
+        self.writter = SummaryWriter(self.log_dir)
+
     def create_sim(self):
         """ 创建物理仿真实例，并在其中构建地面、加载物体资产、创建并行环境。 """
         self.dt = self.sim_params.dt
@@ -678,7 +684,6 @@ class AllegroHandDynamicHandover(BaseTask):
             # 按环境编号循环选择训练物体（实现多物体在不同环境中的随机分配）
             index = i % len(self.used_training_objects)
             select_obj = self.used_training_objects[index]
-            print('--- select_obj: ', select_obj, i, self.num_envs)
             # 创建操作物体 Actor
             object_handle = self.gym.create_actor(
                 env_ptr, self.object_asset_dict[select_obj]['obj'], object_start_pose, "object", i, 0, 0)
@@ -842,6 +847,7 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.total_steps = 0
         self.reset_no_fall = 0
+        self.reset_num = 0
         self.success_buf = torch.zeros_like(self.rew_buf)
         self.hit_success_buf = torch.zeros_like(self.rew_buf)
         self.reset_no_fall_buf = torch.zeros_like(self.rew_buf)
@@ -878,9 +884,21 @@ class AllegroHandDynamicHandover(BaseTask):
         self.extras['consecutive_successes'] = self.consecutive_successes
         self.extras['reset_no_fall'] = self.reset_no_fall_buf
 
-        self.total_steps += 1
+        self.total_steps += self.num_envs
         if self.reset_no_fall_buf.sum() > 0:
             self.reset_no_fall += 1
+        if self.reset_buf.sum() > 0:
+            self.reset_num += 1
+
+        self.writter.add_scalar('Reset', float(self.reset_num), self.total_steps)
+        self.writter.add_scalar('Success', float(self.reset_no_fall), self.total_steps)
+        self.writter.add_scalar('Success Rate', float(self.reset_no_fall / self.reset_num) if self.reset_num > 0 else 0.0, self.total_steps)
+
+        print('total_steps', self.total_steps,
+            'total_reset', self.reset_num,
+            'reset_no_fall', self.reset_no_fall,
+            'reset_no_fall_buf', self.reset_no_fall_buf.sum().item(),
+            'success rate', float(self.reset_no_fall / self.reset_num) if self.reset_num > 0 else 0.0)
 
         if self.print_success_stat:
             self.total_resets = self.total_resets + self.reset_buf.sum()
@@ -890,8 +908,6 @@ class AllegroHandDynamicHandover(BaseTask):
 
             # The direct average shows the overall result more quickly, but slightly undershoots long term
             # policy performance.
-            print('total_steps', self.total_steps, 'reset_no_fall', self.reset_no_fall,
-                  'reset_no_fall_buf', self.reset_no_fall_buf.sum().item())
             print('successes', self.successes.sum().item(), 'resets', self.reset_buf.sum().item(),
                   'total_resets', self.total_resets.item(), 'total_successes', self.total_successes.item())
             print("Direct average consecutive successes = {:.3f}".format(
@@ -1499,7 +1515,9 @@ def compute_hand_reward(
         num_resets + (1.0 - av_factor)*consecutive_successes, consecutive_successes)
 
     reset_no_fall = torch.where(
-        (resets == 1) & (object_pos[:, 2] > 0.15),
+        (resets == 1) & (object_pos[:, 2] > 0.15) &
+        (successes >= max_consecutive_successes) &
+        (goal_resets == 1),
         torch.ones_like(resets), torch.zeros_like(resets))
 
     return reward, resets, goal_resets, progress_buf, successes, cons_successes, reset_no_fall
