@@ -177,7 +177,7 @@ class AllegroHandDynamicHandover(BaseTask):
 
         # self.used_training_objects = ['ball', "block"]
         self.used_training_objects = [
-            "ball", "block", "pen", "obj0", "obj1", "obj2", "obj4", "obj6", "obj7", "obj9", "obj10"]
+            "pen", "ball", "block", "obj0", "obj1", "obj2", "obj4", "obj6", "obj7", "obj9", "obj10"]
 
         # self.used_training_objects = ["novel_obj1", "novel_obj2", "novel_obj3", "novel_obj4", "novel_obj5", "novel_obj6",
         #                               "novel_obj7", "novel_obj8", "novel_obj9", "novel_obj10", "novel_obj11", "novel_obj12", 
@@ -850,8 +850,8 @@ class AllegroHandDynamicHandover(BaseTask):
             self.traj_estimator.train()
 
         self.total_steps = 0
-        self.reset_no_fall = 0
-        self.reset_num = 0
+        self.success_attempts = 0
+        self.total_attempts = 0
         self.success_buf = torch.zeros_like(self.rew_buf)
         self.hit_success_buf = torch.zeros_like(self.rew_buf)
         self.reset_no_fall_buf = torch.zeros_like(self.rew_buf)
@@ -889,20 +889,21 @@ class AllegroHandDynamicHandover(BaseTask):
         self.extras['reset_no_fall'] = self.reset_no_fall_buf
 
         self.total_steps += self.num_envs
-        if self.reset_no_fall_buf.sum() > 0:
-            self.reset_no_fall += 1
-        if self.reset_buf.sum() > 0:
-            self.reset_num += 1
+        current_attempts = int(self.reset_buf.sum().item())
+        current_successes = int(self.reset_no_fall_buf.sum().item())
+        self.total_attempts += current_attempts
+        self.success_attempts += current_successes
 
-        self.writter.add_scalar('Reset', float(self.reset_num), self.total_steps)
-        self.writter.add_scalar('Success', float(self.reset_no_fall), self.total_steps)
-        self.writter.add_scalar('Success Rate', float(self.reset_no_fall / self.reset_num) if self.reset_num > 0 else 0.0, self.total_steps)
+        success_rate = float(self.success_attempts / self.total_attempts) if self.total_attempts > 0 else 0.0
+        self.writter.add_scalar('Reset', float(self.total_attempts), self.total_steps)
+        self.writter.add_scalar('Success', float(self.success_attempts), self.total_steps)
+        self.writter.add_scalar('Success Rate', success_rate, self.total_steps)
 
         print('total_steps', self.total_steps,
-            'total_reset', self.reset_num,
-            'reset_no_fall', self.reset_no_fall,
+            'total_attempts', self.total_attempts,
+            'success_attempts', self.success_attempts,
             'reset_no_fall_buf', self.reset_no_fall_buf.sum().item(),
-            'success rate', float(self.reset_no_fall / self.reset_num) if self.reset_num > 0 else 0.0)
+            'success rate', success_rate)
 
         if self.print_success_stat:
             self.total_resets = self.total_resets + self.reset_buf.sum()
