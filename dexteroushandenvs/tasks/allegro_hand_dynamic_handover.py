@@ -904,9 +904,9 @@ class AllegroHandDynamicHandover(BaseTask):
             self.a_hand_palm_pos - self.object_pos, p=2, dim=-1)
         object_speed = torch.norm(self.object_linvel, p=2, dim=-1)
         # min_contact_count = 1
-        max_palm_obj_dist = 0.14
-        max_object_speed = 0.25
-        min_object_height = 0.12
+        max_palm_obj_dist = 0.16
+        max_object_speed = 0.30
+        min_object_height = 0.10
         stable_grasp = (
             # (contact_count >= min_contact_count) &
             (palm_obj_dist < max_palm_obj_dist) &
