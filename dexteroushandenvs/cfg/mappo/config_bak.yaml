@@ -1,14 +1,15 @@
 env_name: mappo
 algorithm_name: mappo
-experiment_name: stable
+experiment_name: check
 run_dir: ./logs
 use_centralized_V: True
 use_obs_instead_of_state: False
-num_env_steps: 800000000
-episode_length: 20
+# num_env_steps: 1000000000
+num_env_steps: 100000000
+episode_length: 8
 n_rollout_threads: 80
 n_eval_rollout_threads: 1
-use_linear_lr_decay: True
+use_linear_lr_decay: False
 hidden_size: 512
 use_render: False
 recurrent_N: 1
@@ -18,9 +19,9 @@ save_interval: 500
 use_eval: False
 eval_interval: 25
 log_interval: 25
-eval_episodes: 1000
+eval_episodes: 10000
 
-gamma: 0.99
+gamma: 0.96
 gae_lambda: 0.95
 use_gae: True
 use_popart: True
@@ -31,12 +32,12 @@ kl_threshold: 0.016
 ls_step: 10
 accept_ratio: 0.5
 clip_param: 0.2
-ppo_epoch: 4
-num_mini_batch: 4
+ppo_epoch: 5
+num_mini_batch: 1
 data_chunk_length:
 value_loss_coef: 1
-entropy_coef: 0.01
-max_grad_norm: 5
+entropy_coef: 0.0
+max_grad_norm: 10
 huber_delta: 10.0
 use_recurrent_policy: False
 use_naive_recurrent_policy: False

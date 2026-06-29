@@ -855,6 +855,10 @@ class AllegroHandDynamicHandover(BaseTask):
         self.success_buf = torch.zeros_like(self.rew_buf)
         self.hit_success_buf = torch.zeros_like(self.rew_buf)
         self.reset_no_fall_buf = torch.zeros_like(self.rew_buf)
+        self.grasp_success_buf = torch.zeros_like(self.rew_buf)
+        self.grasp_episode_success_buf = torch.zeros_like(self.rew_buf)
+        self.finger_contacts = torch.zeros(
+            (self.num_envs, len(self.contact_sensor_names)), dtype=torch.float, device=self.device)
 
     def get_internal_state(self):
         return self.root_state_tensor[self.object_indices, 3:7]
@@ -888,21 +892,50 @@ class AllegroHandDynamicHandover(BaseTask):
         self.extras['consecutive_successes'] = self.consecutive_successes
         self.extras['reset_no_fall'] = self.reset_no_fall_buf
 
+        # 更偏向“接住并抓稳”的判据：
+        # 1) 这一回合确实是成功回合（reset_no_fall）
+        # 2) 至少有多个触觉/接触点参与
+        # 3) 物体离手掌足够近
+        # 4) 物体速度足够低，说明不是刚碰到就飞走
+        # 5) 物体高度仍然保持在合理范围内，避免把下落过程误判为成功
+
+        # contact_count = torch.sum(self.finger_contacts > 0.5, dim=-1)
+        palm_obj_dist = torch.norm(
+            self.a_hand_palm_pos - self.object_pos, p=2, dim=-1)
+        object_speed = torch.norm(self.object_linvel, p=2, dim=-1)
+        # min_contact_count = 1
+        max_palm_obj_dist = 0.14
+        max_object_speed = 0.25
+        min_object_height = 0.12
+        stable_grasp = (
+            # (contact_count >= min_contact_count) &
+            (palm_obj_dist < max_palm_obj_dist) &
+            (object_speed < max_object_speed) &
+            (self.object_pos[:, 2] > min_object_height)
+        )
+        new_grasp_success = stable_grasp & (self.grasp_episode_success_buf == 0)
+        self.grasp_episode_success_buf = torch.where(
+            new_grasp_success,
+            torch.ones_like(self.grasp_episode_success_buf),
+            self.grasp_episode_success_buf)
+        self.grasp_success_buf[:] = self.grasp_episode_success_buf
+        self.extras['grasp_success'] = self.grasp_success_buf
+
         self.total_steps += self.num_envs
         current_attempts = int(self.reset_buf.sum().item())
-        current_successes = int(self.reset_no_fall_buf.sum().item())
+        current_successes = int(new_grasp_success.sum().item())
         self.total_attempts += current_attempts
         self.success_attempts += current_successes
 
         success_rate = float(self.success_attempts / self.total_attempts) if self.total_attempts > 0 else 0.0
-        self.writter.add_scalar('Reset', float(self.total_attempts), self.total_steps)
-        self.writter.add_scalar('Success', float(self.success_attempts), self.total_steps)
+        self.writter.add_scalar('Total Attempts', float(self.total_attempts), self.total_steps)
+        self.writter.add_scalar('Successful Throws and Catches', float(self.success_attempts), self.total_steps)
         self.writter.add_scalar('Success Rate', success_rate, self.total_steps)
 
         print('total_steps', self.total_steps,
             'total_attempts', self.total_attempts,
             'success_attempts', self.success_attempts,
-            'reset_no_fall_buf', self.reset_no_fall_buf.sum().item(),
+            'grasp_success_buf', self.grasp_success_buf.sum().item(),
             'success rate', success_rate)
 
         if self.print_success_stat:
@@ -1090,6 +1123,7 @@ class AllegroHandDynamicHandover(BaseTask):
         contacts = contacts[:, self.sensor_handle_indices, :]  # 选取 11 个指尖传感器
         contacts = torch.norm(contacts, dim=-1)
         contacts = torch.where(contacts >= 1.0, 1.0, 0.0)  # 阈值为 1.0 N
+        self.finger_contacts = contacts
         self.states_buf[:, contact_start:contact_start + 11] = contacts
 
         # 物体的位姿、线速度和角速度
@@ -1260,6 +1294,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 0
         self.successes[env_ids] = 0
+        self.grasp_episode_success_buf[env_ids] = 0
 
         self.proprioception_close_loop[env_ids] = self.allegro_hand_dof_pos[env_ids, 0:22].clone(
         )
