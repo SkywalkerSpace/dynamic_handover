@@ -5,12 +5,9 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-from matplotlib.pyplot import axis
 import numpy as np
 import os
-import random
 import torch
-import pickle
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -21,39 +18,6 @@ from tasks.hand_base.base_task import BaseTask
 from isaacgym import gymtorch
 from isaacgym import gymapi
 
-from torch import nn
-import torch.nn.functional as F
-
-
-# 轨迹估计器神经网络：用于预测物体的目标接触位姿，输入为物体位置历史序列，输出为预测的目标 3D 位置
-class TrajEstimator(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(TrajEstimator, self).__init__()
-        self.linear1 = nn.Linear(input_dim, 512)
-        self.linear2 = nn.Linear(512, 256)
-        self.linear3 = nn.Linear(256, 128)
-        self.output_layer = nn.Linear(128, output_dim)
-
-        self.activate_func = nn.ELU()
-
-    def forward(self, inputs):
-        # 前向传播：通过三层 MLP + ELU 激活提取特征，最终线性层输出预测位姿
-        x = self.activate_func(self.linear1(inputs))
-        x = self.activate_func(self.linear2(x))
-        x = self.activate_func(self.linear3(x))
-        outputs = self.output_layer(x)
-
-        return outputs, x  # 同时返回输出和倒数第二层特征（可用于辅助损失或蒸馏）
-
-
-# 临时启用梯度计算的上下文管理器（用于在推理阶段临时开启反向传播以更新轨迹估计器）
-class TemporaryGrad(object):
-    def __enter__(self):
-        self.prev = torch.is_grad_enabled()
-        torch.set_grad_enabled(True)
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        torch.set_grad_enabled(self.prev)
 
 
 # Allegro 双手动态递物主任务类，继承 BaseTask，实现递物场景的完整仿真逻辑
@@ -407,8 +371,6 @@ class AllegroHandDynamicHandover(BaseTask):
         self.perturb_direction = torch_rand_float(
             -1, 1, (self.num_envs, 6), device=self.device).squeeze(-1)
 
-        self.predict_pose = self.goal_init_state[:, 0:3].clone()
-
         self.log_dir = str(
             './logs/allegro_hand_dynamic_handover/mappo/success_logs_seed22')
         self.writter = SummaryWriter(self.log_dir)
@@ -641,7 +603,6 @@ class AllegroHandDynamicHandover(BaseTask):
         self.fingertip_indices = []
         self.object_indices = []
         self.goal_object_indices = []
-        self.predict_goal_object_indices = []
 
         for i in range(self.num_envs):
             # 创建第 i 个并行环境实例
@@ -729,16 +690,6 @@ class AllegroHandDynamicHandover(BaseTask):
                 env_ptr, goal_handle, gymapi.DOMAIN_SIM)
             self.goal_object_indices.append(goal_object_idx)
 
-            # 创建预测目标指示器 Actor（显示 TrajEstimator 的预测结果）
-            predict_goal_handle = self.gym.create_actor(
-                env_ptr, self.object_asset_dict[select_obj]['predict goal'], goal_start_pose, "predict_goal_object", i + self.num_envs * 2, 0, 0)
-            predict_goal_object_idx = self.gym.get_actor_index(
-                env_ptr, predict_goal_handle, gymapi.DOMAIN_SIM)
-            self.predict_goal_object_indices.append(predict_goal_object_idx)
-            self.gym.set_rigid_body_color(
-                env_ptr, predict_goal_handle, 0, gymapi.MESH_VISUAL, gymapi.Vec3(0.8, 0.4, 0.))
-            # self.gym.set_actor_scale(env_ptr, predict_goal_handle, 0.01)
-
             if self.enable_camera_sensors:
                 camera_handle = self.gym.create_camera_sensor(
                     env_ptr, self.camera_props)
@@ -804,9 +755,6 @@ class AllegroHandDynamicHandover(BaseTask):
             self.object_indices, dtype=torch.long, device=self.device)
         self.goal_object_indices = to_torch(
             self.goal_object_indices, dtype=torch.long, device=self.device)
-        self.predict_goal_object_indices = to_torch(
-            self.predict_goal_object_indices, dtype=torch.long, device=self.device)
-
         self.init_object_tracking = True
         self.test_for_robot_controller = False
 
@@ -824,30 +772,6 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.debug_target = []
         self.debug_qpos = []
-
-        # 初始化轨迹估计器网络（输入：20帧×3维物体位置历史 = 60维，输出：3维预测目标位置）
-        self.traj_estimator = TrajEstimator(
-            input_dim=60, output_dim=3).to(self.device)
-        for param in self.traj_estimator.parameters():
-            param.requires_grad_(True)
-
-        self.is_test = self.cfg["is_test"]
-
-        # 轨迹估计器的 Adam 优化器
-        self.traj_estimator_optimizer = torch.optim.Adam(
-            self.traj_estimator.parameters(), lr=0.0003)
-        self.traj_estimator_save_path = "./traj_e/"
-        os.makedirs(self.traj_estimator_save_path, exist_ok=True)
-        self.bce_logits_loss = torch.nn.BCEWithLogitsLoss()
-
-        if self.is_test:
-            # 测试模式：加载训练好的轨迹估计器权重
-            self.traj_estimator.load_state_dict(torch.load(
-                "./traj_e/model.pt", map_location='cuda:0'))
-            self.traj_estimator.eval()
-        else:
-            # self.traj_estimator.load_state_dict(torch.load("./traj_e/model_perfect.pt", map_location='cuda:0'))
-            self.traj_estimator.train()
 
         self.total_steps = 0
         self.success_attempts = 0
@@ -1056,16 +980,8 @@ class AllegroHandDynamicHandover(BaseTask):
                 self.object_state_stack_frames[:, (i)*3:(
                     i+1)*3] = self.object_state_stack_frames[:, (i+1)*3:(i+2)*3].clone()
 
-        # 在临时梯度模式下运行轨迹估计器，并在线更新其参数
-        with TemporaryGrad():
-            # 用物体位置序列预测目标接触位置
-            self.predict_pose, self.pose_latent_vector = self.predict_contact_pose(
-                self.traj_estimator, self.object_state_stack_frames)
-            # 用真实目标位置监督轨迹估计器进行在线学习
-            self.update_contact_slamer(self.predict_pose)
-
-        # 将预测位姿和物体近期位置历史写入观测缓冲区
-        self.obs_buf[:, 260:263] = self.predict_pose[:, 0:3].detach()
+        # 只保留真实预定义目标，不再写入预测目标
+        self.obs_buf[:, 260:263] = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
         self.obs_buf[:, 248:260] = self.object_state_stack_frames[
             :, 36:48].clone() + rand_floats[:, 0:12] * 0.05
 
@@ -1075,22 +991,6 @@ class AllegroHandDynamicHandover(BaseTask):
                          self.one_frame_num_obs] = self.obs_buf_stack_frames[i]
             self.obs_buf_stack_frames[i] = self.obs_buf[:, (
                 i) * self.one_frame_num_obs:(i+1) * self.one_frame_num_obs].clone()
-
-    def predict_contact_pose(self, traj_estimator, contact_buf):
-        """ 调用轨迹估计器网络进行前向传播，预测物体的目标接触位置。 """
-        predict_pose, pose_latent_vector = traj_estimator(contact_buf)
-        return predict_pose, pose_latent_vector
-
-    def update_contact_slamer(self, predict_pose):
-        """ 在线更新轨迹估计器：用预测位置与真实目标位置的 MSE 损失进行梯度下降。 """
-        self.pos_loss = F.mse_loss(
-            predict_pose[:, 0:3], (self.goal_pos - self.allegro_right_hand_base_pos).clone())
-        loss = self.pos_loss
-        # 清零梯度 → 反向传播 → 更新参数
-        self.traj_estimator_optimizer.zero_grad()
-        loss.backward()
-        self.traj_estimator_optimizer.step()
-        self.extras['pos_loss'] = self.pos_loss.unsqueeze(0)
 
     def compute_sim2real_asymmetric_obs(self, rand_floats):
         """ 构建非对称全局状态（用于 CTDE 的 Critic），包含双手完整信息、触觉、物体位姿和目标位置。 """
@@ -1246,7 +1146,6 @@ class AllegroHandDynamicHandover(BaseTask):
         object_indices = torch.unique(
             torch.cat([self.object_indices[env_ids],
                        self.goal_object_indices[env_ids],
-                       self.predict_goal_object_indices[env_ids],
                        self.goal_object_indices[goal_env_ids]]).to(torch.int32))
 
         # reset shadow hand
@@ -1370,31 +1269,16 @@ class AllegroHandDynamicHandover(BaseTask):
         self.gym.set_dof_position_target_tensor(
             self.sim, gymtorch.unwrap_tensor(self.cur_targets))
 
-        # 更新预测目标指示器的可视化位置（逐步插值趋近真实目标）
-        self.root_state_tensor[self.predict_goal_object_indices, 0:3] = self.predict_pose[:, 0:3].detach() + self.root_state_tensor[self.hand_indices, 0:3] - (
-            (self.predict_pose[:, 0:3].detach() + self.root_state_tensor[self.hand_indices, 0:3]) - self.goal_pos) * torch.clamp(self.progress_buf[0] * random.random() / 10, 0, 1)
-        self.root_state_tensor[self.predict_goal_object_indices,
-                               3:7] = self.root_state_tensor[self.object_indices, 3:7].detach()
-
-        # 将物体和目标指示器的更新后根状态批量写入仿真器
+        # 只同步真实物体和预定义目标指示器
         object_indices = torch.unique(
             torch.cat([self.object_indices,
-                       self.goal_object_indices,
-                       self.predict_goal_object_indices]).to(torch.int32))
+                       self.goal_object_indices]).to(torch.int32))
 
         self.gym.set_actor_root_state_tensor_indexed(
             self.sim,
             gymtorch.unwrap_tensor(
                 self.root_state_tensor),
             gymtorch.unwrap_tensor(object_indices.to(torch.int32)), len(object_indices.to(torch.int32)))
-
-        # 定期保存轨迹估计器的模型权重（每 200 个 episode 保存一次）
-        if self.total_steps % (200 * (self.max_episode_length - 1)) == 0:
-            iter = int(self.total_steps /
-                       (200 * (self.max_episode_length - 1)))
-            if not self.is_test:
-                torch.save(self.traj_estimator.state_dict(),
-                           self.traj_estimator_save_path + "/model.pt")
 
         self.apply_force = False
         if self.apply_force == True:
