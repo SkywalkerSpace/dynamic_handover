@@ -852,6 +852,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.total_steps = 0
         self.success_attempts = 0
         self.total_attempts = 0
+        self.episode_success_rate_ema = 0.0
         self.success_buf = torch.zeros_like(self.rew_buf)
         self.hit_success_buf = torch.zeros_like(self.rew_buf)
         self.reset_no_fall_buf = torch.zeros_like(self.rew_buf)
@@ -924,18 +925,21 @@ class AllegroHandDynamicHandover(BaseTask):
         self.total_steps += self.num_envs
         current_attempts = int(self.reset_buf.sum().item())
         current_successes = int(
-            (self.reset_buf > 0).logical_and(self.grasp_episode_success_buf > 0).sum().item())
+            (self.reset_no_fall_buf * self.grasp_success_buf).sum().item())
         self.total_attempts += current_attempts
         self.success_attempts += current_successes
 
         success_rate = float(self.success_attempts / self.total_attempts) if self.total_attempts > 0 else 0.0
-        average_episode_success_rate = float(current_successes / current_attempts) if current_attempts > 0 else 0
+        if current_attempts > 0:
+            batch_episode_success_rate = float(current_successes / current_attempts)
+            ema_factor = float(self.av_factor.item())
+            self.episode_success_rate_ema = ema_factor * batch_episode_success_rate + (1.0 - ema_factor) * self.episode_success_rate_ema
+        average_episode_success_rate = self.episode_success_rate_ema
 
         self.writter.add_scalar('Total Attempts', float(self.total_attempts), self.total_steps)
         self.writter.add_scalar('Successful Throws and Catches', float(self.success_attempts), self.total_steps)
         self.writter.add_scalar('Success Rate', success_rate, self.total_steps)
-        if not (success_rate > 0 and average_episode_success_rate == 0):
-            self.writter.add_scalar('Average Episode Success Rate', average_episode_success_rate, self.total_steps)
+        self.writter.add_scalar('Average Episode Success Rate', average_episode_success_rate, self.total_steps)
 
         print('total_steps', self.total_steps,
             'total_attempts', self.total_attempts,
