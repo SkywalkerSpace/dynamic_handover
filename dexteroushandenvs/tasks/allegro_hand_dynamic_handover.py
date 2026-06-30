@@ -914,12 +914,7 @@ class AllegroHandDynamicHandover(BaseTask):
             (object_speed < max_object_speed) &
             (self.object_pos[:, 2] > min_object_height)
         )
-        new_grasp_success = stable_grasp & (self.grasp_episode_success_buf == 0)
-        self.grasp_episode_success_buf = torch.where(
-            new_grasp_success,
-            torch.ones_like(self.grasp_episode_success_buf),
-            self.grasp_episode_success_buf)
-        self.grasp_success_buf[:] = self.grasp_episode_success_buf
+        self.grasp_success_buf[:] = stable_grasp.float()
         self.extras['grasp_success'] = self.grasp_success_buf
 
         self.total_steps += self.num_envs
