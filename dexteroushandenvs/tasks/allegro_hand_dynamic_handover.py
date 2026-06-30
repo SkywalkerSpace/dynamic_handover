@@ -904,9 +904,9 @@ class AllegroHandDynamicHandover(BaseTask):
             self.a_hand_palm_pos - self.object_pos, p=2, dim=-1)
         object_speed = torch.norm(self.object_linvel, p=2, dim=-1)
         # min_contact_count = 1
-        max_palm_obj_dist = 0.16
-        max_object_speed = 0.30
-        min_object_height = 0.10
+        max_palm_obj_dist = 0.15
+        max_object_speed = 0.25
+        min_object_height = 0.15
         stable_grasp = (
             # (contact_count >= min_contact_count) &
             (palm_obj_dist < max_palm_obj_dist) &
@@ -923,20 +923,27 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.total_steps += self.num_envs
         current_attempts = int(self.reset_buf.sum().item())
-        current_successes = int(new_grasp_success.sum().item())
+        current_successes = int(
+            (self.reset_buf > 0).logical_and(self.grasp_episode_success_buf > 0).sum().item())
         self.total_attempts += current_attempts
         self.success_attempts += current_successes
 
         success_rate = float(self.success_attempts / self.total_attempts) if self.total_attempts > 0 else 0.0
+        average_episode_success_rate = float(current_successes / current_attempts) if current_attempts > 0 else 0
+
         self.writter.add_scalar('Total Attempts', float(self.total_attempts), self.total_steps)
         self.writter.add_scalar('Successful Throws and Catches', float(self.success_attempts), self.total_steps)
         self.writter.add_scalar('Success Rate', success_rate, self.total_steps)
+        if not (success_rate > 0 and average_episode_success_rate == 0):
+            self.writter.add_scalar('Average Episode Success Rate', average_episode_success_rate, self.total_steps)
 
         print('total_steps', self.total_steps,
             'total_attempts', self.total_attempts,
             'success_attempts', self.success_attempts,
             'grasp_success_buf', self.grasp_success_buf.sum().item(),
-            'success rate', success_rate)
+            'success rate', success_rate,
+            'average_episode_success_rate', average_episode_success_rate,
+            )
 
         if self.print_success_stat:
             self.total_resets = self.total_resets + self.reset_buf.sum()
