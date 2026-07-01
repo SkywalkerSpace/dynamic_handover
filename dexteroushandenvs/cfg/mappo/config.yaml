@@ -4,8 +4,8 @@ experiment_name: check
 run_dir: ./logs
 use_centralized_V: True
 use_obs_instead_of_state: False
-# num_env_steps: 1000000000
-num_env_steps: 100000000
+
+num_env_steps: 800000000
 episode_length: 8
 n_rollout_threads: 80
 n_eval_rollout_threads: 1
