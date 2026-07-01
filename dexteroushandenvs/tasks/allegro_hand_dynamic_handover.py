@@ -236,7 +236,8 @@ class AllegroHandDynamicHandover(BaseTask):
         super().__init__(cfg=self.cfg)
 
         if self.viewer != None:
-            cam_pos = gymapi.Vec3(0.9, -0.65, 1.0)
+            # cam_pos = gymapi.Vec3(0.9, -0.65, 1.0)
+            cam_pos = gymapi.Vec3(4.0, -0.65, 1.0)
             cam_target = gymapi.Vec3(-0.5, -0.65, 0.2)
 
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
@@ -1177,6 +1178,7 @@ def compute_hand_reward(
         torch.max(catch_successes, catch_this_step),
         catch_successes,
     )
+    # print('thmub_dist:', thmub_dist, 'object_pos[:, 2]:', object_pos[:, 2], 'object_speed:', object_speed)
     # print('catch_condition:', catch_condition.sum().item(), 'catch_successes:', catch_successes.sum().item(), 'catch_hold_counter:', catch_hold_counter.sum().item())
 
     if ignore_z_rot:
