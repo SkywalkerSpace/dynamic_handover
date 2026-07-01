@@ -312,6 +312,14 @@ class AllegroHandDynamicHandover(BaseTask):
         self.successes = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self.consecutive_successes = torch.zeros(1, dtype=torch.float, device=self.device)
 
+        self.catch_successes = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 本局是否已被接住过（catch）
+        self.catch_tolerance = self.cfg["env"].get("catchTolerance", 0.1)  # 判定“接住”的距离阈值(m)，可在cfg里配置
+        self.total_catch_successes = 0   # 累计成功接住的局数
+        self.total_attempts = 0          # 累计的 episode attempts（完成的局数）
+        self.catch_hold_counter = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 连续满足接住条件的帧数
+        self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 10)      # 需要连续保持多少帧才算“接稳”，可按控制频率调整（比如60Hz下10帧≈0.17s）
+        self.catch_vel_tolerance = self.cfg["env"].get("catchVelTolerance", 0.5)  # 物体速度阈值(m/s)，速度太快说明只是擦过/弹跳，不算稳稳接住
+
         self.av_factor = to_torch(self.av_factor, dtype=torch.float, device=self.device)
         self.object_pose_for_open_loop = torch.zeros_like(self.root_state_tensor[self.object_indices, 0:7])
 
@@ -704,20 +712,35 @@ class AllegroHandDynamicHandover(BaseTask):
         return None
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:] = compute_hand_reward(
+        self.rew_buf[:], self.reset_buf[:], self.reset_goal_buf[:], self.progress_buf[:], self.successes[:], self.consecutive_successes[:], self.catch_successes[:], self.catch_hold_counter[:] = compute_hand_reward(
             self.rew_buf, self.reset_buf, self.reset_goal_buf, self.progress_buf, self.successes, self.consecutive_successes,
             self.max_episode_length, self.object_pos, self.object_rot, self.goal_pos, self.goal_rot, self.allegro_left_hand_pos, self.allegro_right_hand_pos, self.allegro_hand_another_thmub_pos, self.aux_up_pos, self.object_linvel, self.leeft_hand_ee_rot,
             self.dist_reward_scale, self.rot_reward_scale, self.rot_eps, self.actions, self.action_penalty_scale, self.allegro_hand_another_ff_pos, self.allegro_hand_another_mf_pos, self.allegro_hand_another_rf_pos, self.allegro_hand_ff_pos, self.allegro_hand_mf_pos, self.allegro_hand_rf_pos, self.a_hand_palm_pos, unscale(self.another_allegro_hand_default_dof_pos[6:],
                                             self.allegro_hand_dof_lower_limits[6:22], self.allegro_hand_dof_upper_limits[6:22]), unscale(self.allegro_hand_another_dof_pos[:, 6:22] ,
                                             self.allegro_hand_dof_lower_limits[6:22], self.allegro_hand_dof_upper_limits[6:22]),
             self.success_tolerance, self.reach_goal_bonus, self.fall_dist, self.fall_penalty,
-            self.max_consecutive_successes, self.av_factor, (self.object_type == "pen")
+            self.max_consecutive_successes, self.av_factor, (self.object_type == "pen"),
+            self.catch_successes, self.catch_hold_counter, self.catch_tolerance, self.catch_hold_steps, self.catch_vel_tolerance,
         )
 
         self.extras['successes'] = self.successes
         self.extras['consecutive_successes'] = self.consecutive_successes
 
         self.total_steps += 1
+
+        # average episode Success Rate = successful catches / episode attempts
+        # episode attempts：本次调用中完成（reset）的局数
+        num_attempts_this_call = self.reset_buf.sum().item()
+        # successful catches：这些完成的局里，被判定为“接住过”的局数
+        num_catches_this_call = (self.catch_successes * self.reset_buf).sum().item()
+
+        self.total_attempts += num_attempts_this_call
+        self.total_catch_successes += num_catches_this_call
+
+        if self.total_attempts > 0:
+            average_episode_success_rate = self.total_catch_successes / self.total_attempts
+            print("Average episode Success Rate (catches/attempts) = {:.3f}".format(average_episode_success_rate))
+            self.extras['average_episode_success_rate'] = average_episode_success_rate
 
         if self.print_success_stat:
             self.total_resets = self.total_resets + self.reset_buf.sum()
@@ -979,6 +1002,8 @@ class AllegroHandDynamicHandover(BaseTask):
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 0
         self.successes[env_ids] = 0
+        self.catch_successes[env_ids] = 0
+        self.catch_hold_counter[env_ids] = 0
 
         self.proprioception_close_loop[env_ids] = self.allegro_hand_dof_pos[env_ids, 0:22].clone()
 
@@ -1110,12 +1135,39 @@ def compute_hand_reward(
     dist_reward_scale: float, rot_reward_scale: float, rot_eps: float,
     actions, action_penalty_scale: float, allegro_hand_another_ff_pos, allegro_hand_another_mf_pos, allegro_hand_another_rf_pos, allegro_hand_ff_pos, allegro_hand_mf_pos, allegro_hand_rf_pos, a_hand_palm_pos, hand_init_qpos, hand_qpos,
     success_tolerance: float, reach_goal_bonus: float, fall_dist: float,
-    fall_penalty: float, max_consecutive_successes: int, av_factor: float, ignore_z_rot: bool
+    fall_penalty: float, max_consecutive_successes: int, av_factor: float, ignore_z_rot: bool,
+    catch_successes, catch_hold_counter, catch_tolerance: float, catch_hold_steps: int, catch_vel_tolerance: float,
 ):
     # Distance from the hand to the object
     goal_dist = torch.norm(target_pos - object_pos, p=2, dim=-1)
 
     thmub_dist = torch.norm(allegro_another_hand_thmub_pos - object_pos, p=2, dim=-1)
+
+    # 判断“当前这一帧”是否满足“被接住”的条件：
+    #   1) 接手拇指离物体足够近
+    #   2) 物体没有掉到地面附近（没有脱手掉落）
+    #   3) 物体速度足够小 —— 排除“飞过去蹭了一下/弹开”，只有速度降下来才说明被稳稳接住
+    object_speed = torch.norm(object_vel, p=2, dim=-1)
+    catch_condition = (thmub_dist <= catch_tolerance) & (object_pos[:, 2] > fall_dist) & (object_speed <= catch_vel_tolerance)
+
+    # 连续帧计数：满足条件就 +1，一旦不满足（脱手/速度过大）就清零 —— 要求“连续”稳定持有，中途断开不能累加
+    catch_hold_counter = torch.where(
+        catch_condition,
+        catch_hold_counter + 1,
+        torch.zeros_like(catch_hold_counter),
+    )
+
+    # 连续保持够 catch_hold_steps 帧，才认为“真正接住”了。一局内只要达到过一次，就记为该局 catch 成功（避免同一局内重复计数）
+    catch_this_step = torch.where(
+        catch_hold_counter >= catch_hold_steps,
+        torch.ones_like(catch_successes),
+        torch.zeros_like(catch_successes),
+    )
+    catch_successes = torch.where(
+        catch_successes < 1,
+        torch.max(catch_successes, catch_this_step),
+        catch_successes,
+    )
 
     if ignore_z_rot:
         success_tolerance = 2.0 * success_tolerance
@@ -1163,7 +1215,7 @@ def compute_hand_reward(
 
     cons_successes = torch.where(num_resets > 0, av_factor*finished_cons_successes/num_resets + (1.0 - av_factor)*consecutive_successes, consecutive_successes)
 
-    return reward, resets, goal_resets, progress_buf, successes, cons_successes
+    return reward, resets, goal_resets, progress_buf, successes, cons_successes, catch_successes, catch_hold_counter
 
 
 @torch.jit.script
