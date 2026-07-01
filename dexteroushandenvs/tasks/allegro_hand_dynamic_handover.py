@@ -322,6 +322,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.catch_hold_counter = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 连续满足接住条件的帧数
         self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 3)      # 需要连续保持多少帧才算“接稳”，可按控制频率调整（比如60Hz下10帧≈0.17s）
         self.catch_vel_tolerance = self.cfg["env"].get("catchVelTolerance", 1.0)  # 物体速度阈值(m/s)，速度太快说明只是擦过/弹跳，不算稳稳接住
+        self.smoothed_episode_success_rate = 0.0
 
         self.av_factor = to_torch(self.av_factor, dtype=torch.float, device=self.device)
         self.object_pose_for_open_loop = torch.zeros_like(self.root_state_tensor[self.object_indices, 0:7])
@@ -744,13 +745,24 @@ class AllegroHandDynamicHandover(BaseTask):
         self.total_catch_successes += num_catches_this_call
 
         success_rate = self.total_catch_successes / self.total_attempts if self.total_attempts > 0 else 0.0
-        average_episode_success_rate = num_catches_this_call / num_attempts_this_call if num_attempts_this_call > 0 else 0.0
-        print('Success Rate:', success_rate, 'Average episode Success Rate:', average_episode_success_rate)
+        # average_episode_success_rate = num_catches_this_call / num_attempts_this_call if num_attempts_this_call > 0 else 0.0
+        if num_attempts_this_call > 0:
+            # 计算当前这一步的真实成功率
+            raw_episode_success_rate = num_catches_this_call / num_attempts_this_call
+            # 平滑系数 alpha 越小越平滑（0.05 代表保留 95% 的历史记忆，融入 5% 的新数据）
+            alpha = float(self.av_factor.item())
+            # 如果是全剧刚开始第一次触发 reset，直接赋值；否则进行平滑叠加
+            if self.total_attempts == num_attempts_this_call:
+                self.smoothed_episode_success_rate = raw_episode_success_rate
+            else:
+                self.smoothed_episode_success_rate = (alpha * raw_episode_success_rate) + ((1 - alpha) * self.smoothed_episode_success_rate)
+
+        print('Success Rate:', success_rate, 'Average episode Success Rate:', self.smoothed_episode_success_rate)
 
         self.writter.add_scalar('Total Attempts', float(self.total_attempts), self.total_steps)
         self.writter.add_scalar('Successful Throws and Catches', float(self.total_catch_successes), self.total_steps)
         self.writter.add_scalar('Success Rate', success_rate, self.total_steps)
-        self.writter.add_scalar('Average Episode Success Rate', average_episode_success_rate, self.total_steps)
+        self.writter.add_scalar('Average Episode Success Rate', self.smoothed_episode_success_rate, self.total_steps)
 
         if self.print_success_stat:
             self.total_resets = self.total_resets + self.reset_buf.sum()
