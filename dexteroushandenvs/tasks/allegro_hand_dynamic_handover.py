@@ -12,6 +12,8 @@ import random
 import torch
 import pickle
 
+from torch.utils.tensorboard import SummaryWriter
+
 from utils.torch_jit_utils import *
 # from isaacgym.torch_utils import *
 
@@ -317,8 +319,8 @@ class AllegroHandDynamicHandover(BaseTask):
         self.total_catch_successes = 0   # 累计成功接住的局数
         self.total_attempts = 0          # 累计的 episode attempts（完成的局数）
         self.catch_hold_counter = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 连续满足接住条件的帧数
-        self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 10)      # 需要连续保持多少帧才算“接稳”，可按控制频率调整（比如60Hz下10帧≈0.17s）
-        self.catch_vel_tolerance = self.cfg["env"].get("catchVelTolerance", 0.5)  # 物体速度阈值(m/s)，速度太快说明只是擦过/弹跳，不算稳稳接住
+        self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 2)      # 需要连续保持多少帧才算“接稳”，可按控制频率调整（比如60Hz下10帧≈0.17s）
+        self.catch_vel_tolerance = self.cfg["env"].get("catchVelTolerance", 0.1)  # 物体速度阈值(m/s)，速度太快说明只是擦过/弹跳，不算稳稳接住
 
         self.av_factor = to_torch(self.av_factor, dtype=torch.float, device=self.device)
         self.object_pose_for_open_loop = torch.zeros_like(self.root_state_tensor[self.object_indices, 0:7])
@@ -353,6 +355,10 @@ class AllegroHandDynamicHandover(BaseTask):
         self.perturb_direction = torch_rand_float(-1, 1, (self.num_envs, 6), device=self.device).squeeze(-1)
 
         self.predict_pose = self.goal_init_state[:, 0:3].clone()
+
+        self.log_dir = str(
+            './logs/allegro_hand_dynamic_handover/mappo/success_rate_logs')
+        self.writter = SummaryWriter(self.log_dir)
 
     def create_sim(self):
         self.dt = self.sim_params.dt
@@ -728,7 +734,6 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.total_steps += 1
 
-        # average episode Success Rate = successful catches / episode attempts
         # episode attempts：本次调用中完成（reset）的局数
         num_attempts_this_call = self.reset_buf.sum().item()
         # successful catches：这些完成的局里，被判定为“接住过”的局数
@@ -737,10 +742,14 @@ class AllegroHandDynamicHandover(BaseTask):
         self.total_attempts += num_attempts_this_call
         self.total_catch_successes += num_catches_this_call
 
-        if self.total_attempts > 0:
-            average_episode_success_rate = self.total_catch_successes / self.total_attempts
-            print("Average episode Success Rate (catches/attempts) = {:.3f}".format(average_episode_success_rate))
-            self.extras['average_episode_success_rate'] = average_episode_success_rate
+        success_rate = self.total_catch_successes / self.total_attempts if self.total_attempts > 0 else 0.0
+        average_episode_success_rate = num_catches_this_call / num_attempts_this_call if num_attempts_this_call > 0 else 0.0
+        print('Success Rate:', success_rate, 'Average episode Success Rate:', average_episode_success_rate)
+
+        self.writter.add_scalar('Total Attempts', float(self.total_attempts), self.total_steps)
+        self.writter.add_scalar('Successful Throws and Catches', float(self.total_catch_successes), self.total_steps)
+        self.writter.add_scalar('Success Rate', success_rate, self.total_steps)
+        self.writter.add_scalar('Average Episode Success Rate', average_episode_success_rate, self.total_steps)
 
         if self.print_success_stat:
             self.total_resets = self.total_resets + self.reset_buf.sum()
@@ -1148,7 +1157,7 @@ def compute_hand_reward(
     #   2) 物体没有掉到地面附近（没有脱手掉落）
     #   3) 物体速度足够小 —— 排除“飞过去蹭了一下/弹开”，只有速度降下来才说明被稳稳接住
     object_speed = torch.norm(object_vel, p=2, dim=-1)
-    catch_condition = (thmub_dist <= catch_tolerance) & (object_pos[:, 2] > fall_dist) & (object_speed <= catch_vel_tolerance)
+    catch_condition = (thmub_dist <= catch_tolerance) & (object_pos[:, 2] > 0.2) & (object_speed <= catch_vel_tolerance)
 
     # 连续帧计数：满足条件就 +1，一旦不满足（脱手/速度过大）就清零 —— 要求“连续”稳定持有，中途断开不能累加
     catch_hold_counter = torch.where(
@@ -1168,6 +1177,7 @@ def compute_hand_reward(
         torch.max(catch_successes, catch_this_step),
         catch_successes,
     )
+    # print('catch_condition:', catch_condition.sum().item(), 'catch_successes:', catch_successes.sum().item(), 'catch_hold_counter:', catch_hold_counter.sum().item())
 
     if ignore_z_rot:
         success_tolerance = 2.0 * success_tolerance
