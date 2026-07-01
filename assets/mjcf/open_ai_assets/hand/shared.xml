@@ -23,32 +23,7 @@
         <default class="robot0:D_Vizual">
             <geom material="robot0:MatViz" contype="0" conaffinity="0" group="1" type="mesh"></geom>
         </default>
-        <default class="robot0:free">
-            <joint type="free" damping="0" armature="0" limited="false"></joint>
-        </default>
     </default>
-
-    <contact>
-        <pair geom1="robot0:C_ffdistal" geom2="robot0:C_thdistal" condim="1"></pair>
-        <pair geom1="robot0:C_ffmiddle" geom2="robot0:C_thdistal" condim="1"></pair>
-        <pair geom1="robot0:C_ffproximal" geom2="robot0:C_thdistal" condim="1"></pair>
-        <pair geom1="robot0:C_mfproximal" geom2="robot0:C_thdistal" condim="1"></pair>
-        <pair geom1="robot0:C_mfdistal" geom2="robot0:C_thdistal" condim="1"></pair>
-        <pair geom1="robot0:C_rfdistal" geom2="robot0:C_thdistal" condim="1"></pair>
-        <pair geom1="robot0:C_lfdistal" geom2="robot0:C_thdistal" condim="1"></pair>
-        <pair geom1="robot0:C_palm0" geom2="robot0:C_thdistal" condim="1"></pair>
-        <pair geom1="robot0:C_mfdistal" geom2="robot0:C_ffdistal" condim="1"></pair>
-        <pair geom1="robot0:C_rfdistal" geom2="robot0:C_mfdistal" condim="1"></pair>
-        <pair geom1="robot0:C_lfdistal" geom2="robot0:C_rfdistal" condim="1"></pair>
-        <pair geom1="robot0:C_mfproximal" geom2="robot0:C_ffproximal" condim="1"></pair>
-        <pair geom1="robot0:C_rfproximal" geom2="robot0:C_mfproximal" condim="1"></pair>
-        <pair geom1="robot0:C_lfproximal" geom2="robot0:C_rfproximal" condim="1"></pair>
-        <pair geom1="robot0:C_lfdistal" geom2="robot0:C_rfdistal" condim="1"></pair>
-        <pair geom1="robot0:C_lfdistal" geom2="robot0:C_mfdistal" condim="1"></pair>
-        <pair geom1="robot0:C_lfdistal" geom2="robot0:C_rfmiddle" condim="1"></pair>
-        <pair geom1="robot0:C_lfmiddle" geom2="robot0:C_rfdistal" condim="1"></pair>
-        <pair geom1="robot0:C_lfmiddle" geom2="robot0:C_rfmiddle" condim="1"></pair>
-    </contact>
 
     <tendon>
         <fixed name="robot0:T_FFJ1c" limited="true" range="-0.001 0.001">

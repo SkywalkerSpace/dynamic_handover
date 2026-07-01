@@ -169,7 +169,7 @@ class AllegroHandDynamicHandover(BaseTask):
 
 
         # self.used_training_objects = ['ball', "block"]
-        self.used_training_objects = ["obj0", "obj1", "obj2", "obj4", "obj6", "obj7", "obj9", "obj10"]
+        self.used_training_objects = ["pen", "ball", "block", "obj0", "obj1", "obj2", "obj4", "obj6", "obj7", "obj9", "obj10"]
 
         # self.used_training_objects = ["ball", "obj0", "obj1", "obj2", "obj4", "obj6", "obj7", "obj9", "obj10",
         #                               "novel_obj1", "novel_obj2", "novel_obj3", "novel_obj4", "novel_obj5", "novel_obj6",
