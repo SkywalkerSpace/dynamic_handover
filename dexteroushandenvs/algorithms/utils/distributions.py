@@ -127,11 +127,21 @@ class DiagGaussian(nn.Module):
         log_std = torch.ones(num_outputs) * self.std_x_coef
         self.log_std = torch.nn.Parameter(log_std)
 
+    # def forward(self, x, available_actions=None):
+    #     # 输出动作均值和标准差，供后续策略采样
+    #     action_mean = self.fc_mean(x)
+
+    #     action_std = torch.sigmoid(
+    #         self.log_std / self.std_x_coef) * self.std_y_coef
+    #     return FixedNormal(action_mean, action_std)
+
     def forward(self, x, available_actions=None):
-        # 输出动作均值和标准差，供后续策略采样
         action_mean = self.fc_mean(x)
-        action_std = torch.sigmoid(
-            self.log_std / self.std_x_coef) * self.std_y_coef
+
+        # 关键修复：在进入 sigmoid 前 clamp，防止参数滑入饱和区
+        log_std_clamped = torch.clamp(self.log_std, min=-3.0, max=3.0)
+        action_std = torch.sigmoid(log_std_clamped / self.std_x_coef) * self.std_y_coef
+
         return FixedNormal(action_mean, action_std)
 
 
