@@ -316,12 +316,12 @@ class AllegroHandDynamicHandover(BaseTask):
         self.consecutive_successes = torch.zeros(1, dtype=torch.float, device=self.device)
 
         self.catch_successes = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 本局是否已被接住过（catch）
-        self.catch_tolerance = self.cfg["env"].get("catchTolerance", 0.1)  # 判定“接住”的距离阈值(m)，可在cfg里配置
+        self.catch_tolerance = self.cfg["env"].get("catchTolerance", 0.15)  # 判定“接住”的距离阈值(m)，可在cfg里配置
         self.total_catch_successes = 0   # 累计成功接住的局数
         self.total_attempts = 0          # 累计的 episode attempts（完成的局数）
         self.catch_hold_counter = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 连续满足接住条件的帧数
         self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 2)      # 需要连续保持多少帧才算“接稳”，可按控制频率调整（比如60Hz下10帧≈0.17s）
-        self.catch_vel_tolerance = self.cfg["env"].get("catchVelTolerance", 0.1)  # 物体速度阈值(m/s)，速度太快说明只是擦过/弹跳，不算稳稳接住
+        self.catch_vel_tolerance = self.cfg["env"].get("catchVelTolerance", 1)  # 物体速度阈值(m/s)，速度太快说明只是擦过/弹跳，不算稳稳接住
 
         self.av_factor = to_torch(self.av_factor, dtype=torch.float, device=self.device)
         self.object_pose_for_open_loop = torch.zeros_like(self.root_state_tensor[self.object_indices, 0:7])
@@ -1153,12 +1153,22 @@ def compute_hand_reward(
 
     thmub_dist = torch.norm(allegro_another_hand_thmub_pos - object_pos, p=2, dim=-1)
 
+    ff_dist = torch.norm(allegro_hand_another_ff_pos - object_pos, p=2, dim=-1)
+    mf_dist = torch.norm(allegro_hand_another_mf_pos - object_pos, p=2, dim=-1)
+    rf_dist = torch.norm(allegro_hand_another_rf_pos - object_pos, p=2, dim=-1)
+
+    finger_dists = torch.stack([thmub_dist, ff_dist, mf_dist, rf_dist], dim=-1)
+
+    close_fingers = (finger_dists <= catch_tolerance).float()  # 每个手指是否贴近
+    num_close_fingers = close_fingers.sum(dim=-1)              # 贴近的手指数
+    enough_fingers_close = num_close_fingers >= 2              # 至少2根手指贴近
+
     # 判断“当前这一帧”是否满足“被接住”的条件：
-    #   1) 接手拇指离物体足够近
+    #   1) 接手指离物体足够近
     #   2) 物体没有掉到地面附近（没有脱手掉落）
-    #   3) 物体速度足够小 —— 排除“飞过去蹭了一下/弹开”，只有速度降下来才说明被稳稳接住
-    object_speed = torch.norm(object_vel, p=2, dim=-1)
-    catch_condition = (thmub_dist <= catch_tolerance) & (object_pos[:, 2] > 0.2) & (object_speed <= catch_vel_tolerance)
+
+    # object_speed = torch.norm(object_vel, p=2, dim=-1)
+    catch_condition = enough_fingers_close & (object_pos[:, 2] > 0.15) # & (object_speed <= catch_vel_tolerance)
 
     # 连续帧计数：满足条件就 +1，一旦不满足（脱手/速度过大）就清零 —— 要求“连续”稳定持有，中途断开不能累加
     catch_hold_counter = torch.where(
@@ -1178,7 +1188,7 @@ def compute_hand_reward(
         torch.max(catch_successes, catch_this_step),
         catch_successes,
     )
-    # print('thmub_dist:', thmub_dist, 'object_pos[:, 2]:', object_pos[:, 2], 'object_speed:', object_speed)
+    # print('finger_dists:', finger_dists, 'object_pos[:, 2]:', object_pos[:, 2])
     # print('catch_condition:', catch_condition.sum().item(), 'catch_successes:', catch_successes.sum().item(), 'catch_hold_counter:', catch_hold_counter.sum().item())
 
     if ignore_z_rot:
