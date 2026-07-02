@@ -734,7 +734,8 @@ class AllegroHandDynamicHandover(BaseTask):
         self.extras['successes'] = self.successes
         self.extras['consecutive_successes'] = self.consecutive_successes
 
-        self.total_steps += 1
+        # self.total_steps += 1
+        self.total_steps += self.num_envs
 
         # episode attempts：本次调用中完成（reset）的局数
         num_attempts_this_call = self.reset_buf.sum().item()
