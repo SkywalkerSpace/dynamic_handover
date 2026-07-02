@@ -359,7 +359,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.predict_pose = self.goal_init_state[:, 0:3].clone()
 
         self.log_dir = str(
-            './logs/allegro_hand_dynamic_handover/mappo/success_rate_logs')
+            './logs/allegro_hand_dynamic_handover/mappo/success_rate_logs_seed{}'.format(self.cfg["seed"]))
         self.writter = SummaryWriter(self.log_dir)
 
     def create_sim(self):
@@ -1164,7 +1164,7 @@ def compute_hand_reward(
     # Distance from the hand to the object
     goal_dist = torch.norm(target_pos - object_pos, p=2, dim=-1)
 
-    thmub_dist = torch.norm(allegro_another_hand_thmub_pos - object_pos, p=2, dim=-1)
+    # thmub_dist = torch.norm(allegro_another_hand_thmub_pos - object_pos, p=2, dim=-1)
 
     left_hand_dist =  torch.norm(allegro_left_hand_pos - object_pos, p=2, dim=-1)
 
