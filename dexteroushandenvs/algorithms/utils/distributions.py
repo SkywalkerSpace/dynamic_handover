@@ -114,7 +114,8 @@ class DiagGaussian(nn.Module):
     def forward(self, x, available_actions=None):
         action_mean = self.fc_mean(x)
         action_std = torch.sigmoid(self.log_std / self.std_x_coef) * self.std_y_coef
-        action_std = torch.clamp(action_std, min=1e-3)
+        action_std = action_std + 0.05
+        action_std = torch.clamp(action_std, min=0.05)
         return FixedNormal(action_mean, action_std)
 
 class Bernoulli(nn.Module):
