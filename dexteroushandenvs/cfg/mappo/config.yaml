@@ -36,7 +36,7 @@ ppo_epoch: 3
 num_mini_batch: 4
 data_chunk_length:
 value_loss_coef: 1
-entropy_coef: 0.01
+entropy_coef: 0.03
 max_grad_norm: 3.0
 huber_delta: 10.0
 use_recurrent_policy: False
@@ -47,7 +47,7 @@ use_huber_loss: True
 use_value_active_masks: False
 use_policy_active_masks: False
 
-lr: 1.5e-4
+lr: 2.e-4
 critic_lr: 3.e-4
 opti_eps: 1.e-5
 weight_decay: 0.0
