@@ -317,7 +317,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.consecutive_successes = torch.zeros(1, dtype=torch.float, device=self.device)
 
         self.catch_successes = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 本局是否已被接住过（catch）
-        self.catch_tolerance = self.cfg["env"].get("catchTolerance", 0.1)  # 判定“接住”的距离阈值(m)，可在cfg里配置
+        self.catch_tolerance = self.cfg["env"].get("catchTolerance", 0.15)  # 判定“接住”的距离阈值(m)，可在cfg里配置
         self.total_catch_successes = 0   # 累计成功接住的局数
         self.total_attempts = 0          # 累计的 episode attempts（完成的局数）
         self.catch_hold_counter = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 连续满足接住条件的帧数
@@ -1184,7 +1184,7 @@ def compute_hand_reward(
     #   2) 物体没有掉到地面附近（没有脱手掉落）
     # object_speed = torch.norm(object_vel, p=2, dim=-1)
 
-    catch_condition = (left_hand_dist <= catch_tolerance) & (object_pos[:, 2] > 0.3) # & (object_speed <= catch_vel_tolerance)
+    catch_condition = (left_hand_dist <= catch_tolerance) & (object_pos[:, 2] > 0.15) # & (object_speed <= catch_vel_tolerance)
 
     # ------------------------------------------------------------------ #
     # catch_hold_counter 维护：满足条件则累加，不满足则立即归零
