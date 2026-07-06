@@ -13,9 +13,9 @@ learn:
   resume: 0
   save_interval: 200 # check for potential saves every this many iterations
   print_log: True
-  
+
   # rollout params
-  max_iterations: 6104
+  max_iterations: 50000
 
   # training params
   cliprange: 0.2
