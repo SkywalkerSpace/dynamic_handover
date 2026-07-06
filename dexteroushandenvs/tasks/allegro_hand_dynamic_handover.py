@@ -321,7 +321,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.total_catch_successes = 0   # 累计成功接住的局数
         self.total_attempts = 0          # 累计的 episode attempts（完成的局数）
         self.catch_hold_counter = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)  # 连续满足接住条件的帧数
-        self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 10)      # 需要连续保持多少帧才算“接稳”，可按控制频率调整（比如60Hz下10帧≈0.17s）
+        self.catch_hold_steps = self.cfg["env"].get("catchHoldSteps", 5)      # 需要连续保持多少帧才算“接稳”，可按控制频率调整（比如60Hz下10帧≈0.17s）
         self.catch_vel_tolerance = self.cfg["env"].get("catchVelTolerance", 1.0)  # 物体速度阈值(m/s)，速度太快说明只是擦过/弹跳，不算稳稳接住
         self.smoothed_episode_success_rate = 0.0
 
