@@ -1183,28 +1183,19 @@ def compute_hand_reward(
     #   1) 接手指离物体足够近
     #   2) 物体没有掉到地面附近（没有脱手掉落）
     # object_speed = torch.norm(object_vel, p=2, dim=-1)
+
     catch_condition = (left_hand_dist <= catch_tolerance) & (object_pos[:, 2] > 0.3) # & (object_speed <= catch_vel_tolerance)
 
+    # ------------------------------------------------------------------ #
+    # catch_hold_counter 维护：满足条件则累加，不满足则立即归零
+    # 要求"连续"稳定持有，中途断开不能累加
+    # ------------------------------------------------------------------ #
     # 连续帧计数：满足条件就 +1，一旦不满足（脱手/速度过大）就清零 —— 要求“连续”稳定持有，中途断开不能累加
     catch_hold_counter = torch.where(
         catch_condition,
         catch_hold_counter + 1,
         torch.zeros_like(catch_hold_counter),
     )
-
-    # 连续保持够 catch_hold_steps 帧，才认为“真正接住”了。一局内只要达到过一次，就记为该局 catch 成功（避免同一局内重复计数）
-    catch_this_step = torch.where(
-        catch_hold_counter >= catch_hold_steps,
-        torch.ones_like(catch_successes),
-        torch.zeros_like(catch_successes),
-    )
-    catch_successes = torch.where(
-        catch_successes < 1,
-        torch.max(catch_successes, catch_this_step),
-        catch_successes,
-    )
-    # print('thmub_dist:', thmub_dist, 'left_hand_dist:', left_hand_dist, 'object_pos[:, 2]:', object_pos[:, 2])
-    # print('catch_condition:', catch_condition.sum().item(), 'catch_successes:', catch_successes.sum().item(), 'catch_hold_counter:', catch_hold_counter.sum().item())
 
     if ignore_z_rot:
         success_tolerance = 2.0 * success_tolerance
@@ -1246,6 +1237,26 @@ def compute_hand_reward(
     # Apply penalty for not reaching the goal
     if max_consecutive_successes > 0:
         reward = torch.where(progress_buf >= max_episode_length, reward + 0.5 * fall_penalty, reward)
+
+    # ------------------------------------------------------------------ #
+    # 在 resets 确定之后，才评估 catch_successes（每局仅一次）
+    #
+    # 成功条件：reset 触发时 catch_hold_counter 仍 >= catch_hold_steps
+    #   - 跌落 reset（object_pos[:,2] <= 0.15）：catch_condition 为 False，
+    #     counter 已归零 → 不满足 → 正确判为失败
+    #   - 超时 reset 且物体仍稳定在手中：counter 仍累积 → 满足 → 判为成功
+    #
+    # 非 reset 帧：保持 catch_successes 原值不变（单局内不重复计数）
+    # ------------------------------------------------------------------ #
+    catch_successes = torch.where(
+        resets == 1,
+        torch.where(
+            catch_hold_counter >= catch_hold_steps,
+            torch.ones_like(catch_successes),   # reset时仍持有 → 成功
+            torch.zeros_like(catch_successes),  # reset时已脱手 → 失败
+        ),
+        catch_successes,  # 未 reset：本局计数保持不变
+    )
 
     num_resets = torch.sum(resets)
     finished_cons_successes = torch.sum(successes * resets.float())
