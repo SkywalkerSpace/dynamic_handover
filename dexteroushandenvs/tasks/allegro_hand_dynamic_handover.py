@@ -27,31 +27,6 @@ import cv2
 from torch import nn
 import torch.nn.functional as F
 
-class TrajEstimator(nn.Module):
-    def __init__(self, input_dim, output_dim) :
-        super(TrajEstimator, self).__init__()
-        self.linear1 = nn.Linear(input_dim, 512)
-        self.linear2 = nn.Linear(512, 256)
-        self.linear3 = nn.Linear(256, 128)
-        self.output_layer = nn.Linear(128, output_dim)
-
-        self.activate_func = nn.ELU()
-
-    def forward(self, inputs):
-        x = self.activate_func(self.linear1(inputs))
-        x = self.activate_func(self.linear2(x))
-        x = self.activate_func(self.linear3(x))
-        outputs = self.output_layer(x)
-
-        return outputs, x
-
-class TemporaryGrad(object):
-    def __enter__(self):
-        self.prev = torch.is_grad_enabled()
-        torch.set_grad_enabled(True)
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        torch.set_grad_enabled(self.prev)
 
 class AllegroHandDynamicHandover(BaseTask):
     def __init__(self, cfg, sim_params, physics_engine, device_type, device_id, headless, agent_index=[[[0, 1, 2, 3, 4, 5]], [[0, 1, 2, 3, 4, 5]]], is_multi_agent=False):
@@ -357,8 +332,6 @@ class AllegroHandDynamicHandover(BaseTask):
         self.object_rb_handles = 46
         self.perturb_direction = torch_rand_float(-1, 1, (self.num_envs, 6), device=self.device).squeeze(-1)
 
-        self.predict_pose = self.goal_init_state[:, 0:3].clone()
-
         self.algorithm_name = self.cfg["env"]["algorithm_name"]
         if self.cfg["is_test"]:
             self.log_dir = str(
@@ -551,7 +524,6 @@ class AllegroHandDynamicHandover(BaseTask):
         self.fingertip_indices = []
         self.object_indices = []
         self.goal_object_indices = []
-        self.predict_goal_object_indices = []
 
         for i in range(self.num_envs):
             # create env instance
@@ -615,13 +587,6 @@ class AllegroHandDynamicHandover(BaseTask):
             goal_object_idx = self.gym.get_actor_index(env_ptr, goal_handle, gymapi.DOMAIN_SIM)
             self.goal_object_indices.append(goal_object_idx)
 
-            # add goal object
-            predict_goal_handle = self.gym.create_actor(env_ptr, self.object_asset_dict[select_obj]['predict goal'], goal_start_pose, "predict_goal_object", i + self.num_envs * 2, 0, 0)
-            predict_goal_object_idx = self.gym.get_actor_index(env_ptr, predict_goal_handle, gymapi.DOMAIN_SIM)
-            self.predict_goal_object_indices.append(predict_goal_object_idx)
-            self.gym.set_rigid_body_color(env_ptr, predict_goal_handle, 0, gymapi.MESH_VISUAL, gymapi.Vec3(0.8, 0.4, 0.))
-            # self.gym.set_actor_scale(env_ptr, predict_goal_handle, 0.01)
-
             if self.enable_camera_sensors:
                 camera_handle = self.gym.create_camera_sensor(env_ptr, self.camera_props)
                 self.gym.set_camera_location(camera_handle, env_ptr, gymapi.Vec3(0, -0.3, 0.43), gymapi.Vec3(0, -0.55, 0))
@@ -674,7 +639,6 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.object_indices = to_torch(self.object_indices, dtype=torch.long, device=self.device)
         self.goal_object_indices = to_torch(self.goal_object_indices, dtype=torch.long, device=self.device)
-        self.predict_goal_object_indices = to_torch(self.predict_goal_object_indices, dtype=torch.long, device=self.device)
 
         self.init_object_tracking = True
         self.test_for_robot_controller = False
@@ -689,24 +653,6 @@ class AllegroHandDynamicHandover(BaseTask):
 
         self.debug_target = []
         self.debug_qpos = []
-
-        self.traj_estimator = TrajEstimator(input_dim=60, output_dim=3).to(self.device)
-        for param in self.traj_estimator.parameters():
-            param.requires_grad_(True)
-
-        self.is_test = self.cfg["is_test"]
-
-        self.traj_estimator_optimizer = torch.optim.Adam(self.traj_estimator.parameters(), lr=0.0003)
-        self.traj_estimator_save_path = "./traj_e/"
-        os.makedirs(self.traj_estimator_save_path, exist_ok=True)
-        self.bce_logits_loss = torch.nn.BCEWithLogitsLoss()
-
-        if self.is_test:
-            self.traj_estimator.load_state_dict(torch.load("./traj_e/model.pt", map_location='cuda:0'))
-            self.traj_estimator.eval()
-        else:
-            # self.traj_estimator.load_state_dict(torch.load("./traj_e/model_perfect.pt", map_location='cuda:0'))
-            self.traj_estimator.train()
 
         self.total_steps = 0
         self.success_buf = torch.zeros_like(self.rew_buf)
@@ -860,29 +806,12 @@ class AllegroHandDynamicHandover(BaseTask):
             else:
                 self.object_state_stack_frames[:, (i)*3:(i+1)*3] = self.object_state_stack_frames[:, (i+1)*3:(i+2)*3].clone()
 
-        with TemporaryGrad():
-            self.predict_pose, self.pose_latent_vector = self.predict_contact_pose(self.traj_estimator, self.object_state_stack_frames)
-            self.update_contact_slamer(self.predict_pose)
-
-        self.obs_buf[:, 260:263] = self.predict_pose[:, 0:3].detach()
-        # self.obs_buf[:, 260:263] = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
+        self.obs_buf[:, 260:263] = (self.goal_pos - self.allegro_right_hand_base_pos).clone()
         self.obs_buf[:, 248:260] = self.object_state_stack_frames[:, 36:48].clone() + rand_floats[:, 0:12] * 0.05
 
         for i in range(len(self.obs_buf_stack_frames) - 1):
             self.obs_buf[:, (i+1) * self.one_frame_num_obs:(i+2) * self.one_frame_num_obs] = self.obs_buf_stack_frames[i]
             self.obs_buf_stack_frames[i] = self.obs_buf[:, (i) * self.one_frame_num_obs:(i+1) * self.one_frame_num_obs].clone()
-
-    def predict_contact_pose(self, traj_estimator, contact_buf):
-        predict_pose, pose_latent_vector = traj_estimator(contact_buf)
-        return predict_pose, pose_latent_vector
-
-    def update_contact_slamer(self, predict_pose):
-        self.pos_loss = F.mse_loss(predict_pose[:, 0:3], (self.goal_pos - self.allegro_right_hand_base_pos).clone())
-        loss = self.pos_loss
-        self.traj_estimator_optimizer.zero_grad()
-        loss.backward()
-        self.traj_estimator_optimizer.step()
-        self.extras['pos_loss'] = self.pos_loss.unsqueeze(0)
 
     def compute_sim2real_asymmetric_obs(self, rand_floats):
         self.states_buf[:, 0:self.num_allegro_hand_dofs] = unscale(self.allegro_hand_dof_pos,
@@ -986,7 +915,6 @@ class AllegroHandDynamicHandover(BaseTask):
 
         object_indices = torch.unique(torch.cat([self.object_indices[env_ids],
                                                  self.goal_object_indices[env_ids],
-                                                 self.predict_goal_object_indices[env_ids],
                                                  self.goal_object_indices[goal_env_ids]]).to(torch.int32))
 
         # reset shadow hand
@@ -1083,21 +1011,12 @@ class AllegroHandDynamicHandover(BaseTask):
         self.prev_targets[:, :] = self.cur_targets[:, :]
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.cur_targets))
 
-        self.root_state_tensor[self.predict_goal_object_indices, 0:3] = self.predict_pose[:, 0:3].detach() + self.root_state_tensor[self.hand_indices, 0:3] - ((self.predict_pose[:, 0:3].detach() + self.root_state_tensor[self.hand_indices, 0:3]) - self.goal_pos) * torch.clamp(self.progress_buf[0] * random.random() / 10, 0, 1)
-        self.root_state_tensor[self.predict_goal_object_indices, 3:7] = self.root_state_tensor[self.object_indices, 3:7].detach()
-
         object_indices = torch.unique(torch.cat([self.object_indices,
-                                                 self.goal_object_indices,
-                                                 self.predict_goal_object_indices]).to(torch.int32))
+                                                 self.goal_object_indices]).to(torch.int32))
 
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.root_state_tensor),
                                                      gymtorch.unwrap_tensor(object_indices.to(torch.int32)), len(object_indices.to(torch.int32)))
-
-        if self.total_steps % (200 * (self.max_episode_length - 1)) == 0:
-            iter = int(self.total_steps / (200 * (self.max_episode_length - 1)))
-            if not self.is_test:
-                torch.save(self.traj_estimator.state_dict(), self.traj_estimator_save_path + "/model.pt")
 
         self.apply_force = False
         if self.apply_force == True:
