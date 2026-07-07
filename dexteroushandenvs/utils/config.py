@@ -87,6 +87,8 @@ def load_cfg(args, use_rlg_config=False):
     with open(os.path.join(os.getcwd(), args.cfg_env), 'r') as f:
         cfg = yaml.load(f, Loader=yaml.SafeLoader)
 
+    cfg["env"]["algorithm_name"] = args.algo
+
     # Override number of environments if passed on the command line
     if args.num_envs > 0:
         cfg["env"]["numEnvs"] = args.num_envs
