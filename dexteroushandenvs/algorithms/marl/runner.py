@@ -65,13 +65,13 @@ class Runner:
 
         self.run_dir = config["run_dir"]
         if config["is_test"]:
-            self.log_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'/logs_seed{}_test'.format(self.seed))
+            self.log_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'-wo-ge/logs_seed{}_test'.format(self.seed))
         else:
-            self.log_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'/logs_seed{}'.format(self.seed))
+            self.log_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'-wo-ge/logs_seed{}'.format(self.seed))
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
         self.writter = SummaryWriter(self.log_dir)
-        self.save_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name + '/models_seed{}'.format(self.seed))
+        self.save_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'-wo-ge/models_seed{}'.format(self.seed))
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
