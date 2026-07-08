@@ -11,6 +11,9 @@ def process_ppo(args, env, cfg_train, logdir):
         is_testing = True
         chkpt_path = args.model_dir
 
+    logdir_list = logdir.rstrip('/').split("/")
+    logdir_list[-2] = logdir_list[-2] + "-wo-ge"
+    logdir = "/".join(logdir_list)
     if is_testing:
         logdir = logdir + "_seed{}_test".format(env.task.cfg["seed"])
     else:
