@@ -11,11 +11,12 @@ learn:
   agent_name: shadow_hand
   test: False
   resume: 0
-  save_interval: 200 # check for potential saves every this many iterations
+  save_interval: 500 # check for potential saves every this many iterations
   print_log: True
 
   # rollout params
-  max_iterations: 50000
+  # 8192 num_envs
+  max_iterations: 12208
 
   # training params
   cliprange: 0.2
