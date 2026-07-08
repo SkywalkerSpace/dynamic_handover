@@ -64,7 +64,10 @@ class Runner:
         torch.backends.cudnn.benchmark = True
 
         self.run_dir = config["run_dir"]
-        self.log_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'/logs_seed{}'.format(self.seed))
+        if config["is_test"]:
+            self.log_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'/logs_seed{}_test'.format(self.seed))
+        else:
+            self.log_dir = str(self.run_dir + '/' + self.env_name + '/' + self.algorithm_name +'/logs_seed{}'.format(self.seed))
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
         self.writter = SummaryWriter(self.log_dir)

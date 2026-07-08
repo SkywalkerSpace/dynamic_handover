@@ -11,7 +11,10 @@ def process_ppo(args, env, cfg_train, logdir):
         is_testing = True
         chkpt_path = args.model_dir
 
-    logdir = logdir + "_seed{}".format(env.task.cfg["seed"])
+    if is_testing:
+        logdir = logdir + "_seed{}_test".format(env.task.cfg["seed"])
+    else:
+        logdir = logdir + "_seed{}".format(env.task.cfg["seed"])
 
     if env.task.cfg["env"]["observationType"] in ["point_cloud", "point_cloud_for_distill"]:
         actor_critic = ActorCriticPointCloud
