@@ -708,10 +708,10 @@ class AllegroHandDynamicHandover(BaseTask):
 
         print('Success Rate:', success_rate, 'Average episode Success Rate:', self.smoothed_episode_success_rate)
 
-        self.writter.add_scalar('Total Attempts', float(self.total_attempts), self.total_steps)
-        self.writter.add_scalar('Successful Throws and Catches', float(self.total_catch_successes), self.total_steps)
-        self.writter.add_scalar('Success Rate', success_rate, self.total_steps)
-        self.writter.add_scalar('Average Episode Success Rate', self.smoothed_episode_success_rate, self.total_steps)
+        self.writter.add_scalar('Test Total Attempts', float(self.total_attempts), self.total_steps)
+        self.writter.add_scalar('Test Successful Throws and Catches', float(self.total_catch_successes), self.total_steps)
+        self.writter.add_scalar('Test Success Rate', success_rate, self.total_steps)
+        self.writter.add_scalar('Test Average Episode Success Rate', self.smoothed_episode_success_rate, self.total_steps)
 
         if self.print_success_stat:
             self.total_resets = self.total_resets + self.reset_buf.sum()
