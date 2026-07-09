@@ -111,7 +111,7 @@ class PPO:
         current_states = self.vec_env.get_state()
 
         if self.is_testing:
-            while True:
+            for index in range(1000):
                 with torch.no_grad():
                     if self.apply_reset:
                         current_obs = self.vec_env.reset()
