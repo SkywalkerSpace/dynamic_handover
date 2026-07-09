@@ -360,10 +360,7 @@ class AllegroHandDynamicHandover(BaseTask):
         self.predict_pose = self.goal_init_state[:, 0:3].clone()
 
         self.algorithm_name = self.cfg["env"]["algorithm_name"]
-        if self.cfg["is_test"]:
-            self.log_dir = str(
-                './logs/allegro_hand_dynamic_handover/{}/success_rate_logs_seed{}_test'.format(self.algorithm_name, self.cfg["seed"]))
-            self.log_dir = str(
+        self.log_dir = str(
             './logs/allegro_hand_dynamic_handover/{}/success_rate_logs_seed{}'.format(self.algorithm_name, self.cfg["seed"]))
         self.writter = SummaryWriter(self.log_dir)
 
